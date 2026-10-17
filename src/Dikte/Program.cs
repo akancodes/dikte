@@ -3,13 +3,14 @@ namespace Dikte;
 static class Program
 {
     [STAThread]
-    static void Main()
+    static void Main(string[] args)
     {
         using var single = new Mutex(true, @"Local\Dikte.SingleInstance", out bool first);
+        using var showSignal = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\Dikte.ShowWindow");
         if (!first)
         {
-            MessageBox.Show("Dikte is already running. Look for the microphone in the notification area.", "Dikte",
-                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            // Already running: bring its window up instead of starting twice.
+            showSignal.Set();
             return;
         }
 
@@ -25,9 +26,10 @@ static class Program
         };
 
         Directory.CreateDirectory(Paths.Dir);
+        Ducker.RecoverFromCrash();
         // The context reads SynchronizationContext.Current, which WinForms installs with the first control.
         using var anchor = new Control();
         anchor.CreateControl();
-        Application.Run(new TrayApp());
+        Application.Run(new TrayApp(openWindow: !args.Contains("--background"), showSignal));
     }
 }

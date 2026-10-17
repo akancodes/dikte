@@ -46,10 +46,10 @@ public class SettingsTests
         Assert.Equal("ctrl+win", fresh.Hotkey);
         Assert.Contains("\"hotkey\"", File.ReadAllText(path));
 
-        File.WriteAllText(path, "{\n // my keys\n \"hotkey\": \"rctrl\",\n \"language\": \"tr\",\n}");
+        File.WriteAllText(path, "{\n // my keys\n \"hotkey\": \"rctrl\",\n \"languages\": [\"tr\", \"en\"],\n}");
         var mine = Settings.LoadOrCreate(path);
         Assert.Equal("rctrl", mine.Hotkey);
-        Assert.Equal("tr", mine.Language);
+        Assert.Equal(new[] { "tr", "en" }, mine.Languages);
         Assert.Equal("gpt-transcribe", mine.Model);
     }
 
@@ -122,7 +122,7 @@ public sealed class TranscriberTests : IDisposable
     {
         _answers.Enqueue((200, "{\"text\":\"  Merhaba, deploy et.  \"}"));
         var api = new Transcriber(new HttpClient());
-        var text = await api.TranscribeAsync(Wav.FromPcm16(new byte[640], 16000, 1), Config(s => s.Language = "tr"), "sk-test", default);
+        var text = await api.TranscribeAsync(Wav.FromPcm16(new byte[640], 16000, 1), Config(s => s.Languages = new() { "tr" }), "sk-test", default);
         Assert.Equal("Merhaba, deploy et.", text);
         var (path, auth, body) = Assert.Single(_requests);
         Assert.Equal("/v1/audio/transcriptions", path);
@@ -135,6 +135,16 @@ public sealed class TranscriberTests : IDisposable
         Assert.Contains("filename=dictation.wav", body);
         Assert.Contains("audio/wav", body);
         Assert.Contains("RIFF", body);
+    }
+
+    [Fact]
+    public async Task Mixed_languages_go_in_the_prompt_not_the_language_field()
+    {
+        _answers.Enqueue((200, "{\"text\":\"hi\"}"));
+        await new Transcriber(new HttpClient()).TranscribeAsync(new byte[44], Config(s => s.Languages = new() { "tr", "en" }), "k", default);
+        var body = Assert.Single(_requests).body;
+        Assert.DoesNotContain("name=language", body);
+        Assert.Contains("mixes Turkish and English", body);
     }
 
     [Fact]
@@ -200,4 +210,54 @@ public sealed class TranscriberTests : IDisposable
     }
 
     public void Dispose() => _server.Close();
+}
+
+public class LanguagesTests
+{
+    [Fact]
+    public void One_language_is_pinned_several_are_hinted()
+    {
+        Assert.Equal("tr", Languages.Pinned(new[] { "tr" }));
+        Assert.Null(Languages.Pinned(new[] { "tr", "en" }));
+        Assert.Null(Languages.Pinned(Array.Empty<string>()));
+        Assert.Equal("Docker", Languages.BuildPrompt(new[] { "tr" }, " Docker "));
+        Assert.Equal("", Languages.BuildPrompt(Array.Empty<string>(), ""));
+        var mixed = Languages.BuildPrompt(new[] { "tr", "en" }, "Docker");
+        Assert.StartsWith("Konuşma Türkçe ve İngilizce karışık", mixed);
+        Assert.EndsWith("Docker", mixed);
+        Assert.Contains("mixes German, French and Spanish", Languages.BuildPrompt(new[] { "de", "fr", "es" }, ""));
+    }
+
+    [Fact]
+    public void Rejects_language_names_instead_of_codes()
+    {
+        var s = new Settings { Languages = new() { "Turkish" } };
+        Assert.Throws<FormatException>(s.Validate);
+    }
+}
+
+public class StatsTests
+{
+    [Fact]
+    public void Sums_the_week_and_prices_the_month()
+    {
+        var path = Path.Combine(Directory.CreateTempSubdirectory().FullName, "stats.json");
+        var stats = new Stats(path);
+        var now = new DateTime(2026, 10, 17, 12, 0, 0);
+        stats.Record(now, 100, 60, "gpt-transcribe");
+        stats.Record(now.AddDays(-6), 50, 30, "gpt-transcribe");
+        stats.Record(now.AddDays(-7), 1000, 600, "gpt-transcribe"); // outside the 7 days
+        stats.Record(new DateTime(2026, 9, 30), 10, 60, "whisper-1"); // last month
+
+        var s = new Stats(path).Summary(now);
+        Assert.Equal(150, s.WeekWords);
+        Assert.Equal(1.5, s.WeekMinutes, 3);
+        Assert.Equal((60 + 30 + 600) / 60.0 * 0.0045, s.MonthCost, 6);
+        Assert.Equal(1160, s.TotalWords);
+        Assert.Equal(4, s.TotalCount);
+        Assert.Equal((int)Math.Round(1160 / (750 / 60.0)), s.Wpm);
+    }
+
+    [Fact]
+    public void Other_servers_cost_nothing() => Assert.Equal(0, Stats.PricePerMinute("whisper-large-v3-turbo"));
 }

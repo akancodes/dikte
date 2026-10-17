@@ -29,8 +29,9 @@ public sealed class Transcriber(HttpClient http)
             form.Add(file, "file", "dictation.wav");
             form.Add(new StringContent(s.Model), "model");
             form.Add(new StringContent("json"), "response_format");
-            if (!string.IsNullOrWhiteSpace(s.Language)) form.Add(new StringContent(s.Language.Trim()), "language");
-            if (!string.IsNullOrWhiteSpace(s.Vocabulary)) form.Add(new StringContent(s.Vocabulary.Trim()), "prompt");
+            if (Languages.Pinned(s.Languages) is { } language) form.Add(new StringContent(language), "language");
+            var prompt = Languages.BuildPrompt(s.Languages, s.Vocabulary);
+            if (prompt.Length > 0) form.Add(new StringContent(prompt), "prompt");
             return Request(s, apiKey, "audio/transcriptions", form);
         }, ct);
         return (json["text"]?.GetValue<string>() ?? "").Trim();

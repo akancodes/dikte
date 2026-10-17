@@ -17,8 +17,11 @@ public sealed class Settings
     /// <summary>gpt-transcribe, gpt-4o-transcribe, gpt-4o-mini-transcribe, whisper-1...</summary>
     public string Model { get; set; } = "gpt-transcribe";
 
-    /// <summary>ISO-639-1 code ("tr", "en") to pin the language; empty lets the model detect it, which handles mixed speech.</summary>
-    public string Language { get; set; } = "";
+    /// <summary>
+    /// ISO-639-1 codes of the languages you speak ("tr", "en"). None: the model detects. One: it is pinned.
+    /// Several: the model is told you mix them, so it writes each word in the language it was spoken.
+    /// </summary>
+    public List<string> Languages { get; set; } = new();
 
     /// <summary>Names and terms the model should spell your way.</summary>
     public string Vocabulary { get; set; } = "Claude Code, Claude, commit, pull request, deploy, npm, TypeScript, Docker";
@@ -44,6 +47,12 @@ public sealed class Settings
     public string Microphone { get; set; } = "";
 
     public bool Sounds { get; set; } = true;
+
+    /// <summary>Turn other apps (music, videos) down while recording, so the mic hears you and you hear yourself think.</summary>
+    public bool QuietOtherAudio { get; set; } = true;
+
+    /// <summary>What other apps are turned down to while recording: 0 mutes them, 0.15 leaves 15% of their volume.</summary>
+    public double QuietLevel { get; set; } = 0.15;
 
     public int MaxMinutes { get; set; } = 10;
 
@@ -88,6 +97,9 @@ public sealed class Settings
             throw new FormatException("pasteShortcut must be \"ctrl+v\", \"ctrl+shift+v\" or \"shift+insert\".");
         if (!Uri.TryCreate(ApiBase, UriKind.Absolute, out _)) throw new FormatException($"apiBase \"{ApiBase}\" is not a URL.");
         if (string.IsNullOrWhiteSpace(Model)) throw new FormatException("model is empty.");
+        if (Languages.Any(l => l.Length is < 2 or > 3 || !l.All(char.IsAsciiLetterLower)))
+            throw new FormatException("languages must be ISO codes like \"tr\" and \"en\".");
+        if (QuietLevel is < 0 or > 1) throw new FormatException("quietLevel must be between 0 and 1.");
         if (MaxMinutes is < 1 or > 12) throw new FormatException("maxMinutes must be between 1 and 12 (the API takes files up to 25 MB).");
     }
 }

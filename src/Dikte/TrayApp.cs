@@ -1,4 +1,7 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Dikte.Core;
 
 namespace Dikte;
@@ -10,25 +13,33 @@ sealed class TrayApp : ApplicationContext
     readonly Transcriber _api;
     readonly NotifyIcon _tray;
     readonly Overlay _overlay = new();
+    readonly Ducker _ducker = new();
     readonly System.Windows.Forms.Timer _watch = new() { Interval = 150 };
+    readonly System.Windows.Forms.Timer _levelTick = new() { Interval = 40 };
     readonly SynchronizationContext _ui;
     readonly Icon _idleIcon, _recordingIcon, _workingIcon;
     readonly FileSystemWatcher _settingsWatcher;
+    readonly Stats _stats = new(Paths.Stats);
+    readonly RegisteredWaitHandle _showRequests;
 
     Settings _settings;
     HotkeyMachine _machine;
     KeyboardHook? _hook;
     History _history;
+    MainWindow? _window;
 
     Recorder? _recorder;
+    Recorder? _micTest;
     DateTime _recordingStarted;
     bool _feedbackShown;
     int _pending;
     CancellationTokenSource _cancel = new();
     Task _lastInsert = Task.CompletedTask;
     byte[]? _failedAudio;
+    string? _errorMessage, _errorHint;
+    DateTime _lastReload;
 
-    public TrayApp()
+    public TrayApp(bool openWindow, EventWaitHandle showSignal)
     {
         _ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         _api = new Transcriber(_http);
@@ -43,12 +54,13 @@ sealed class TrayApp : ApplicationContext
         _tray = new NotifyIcon { Icon = _idleIcon, Visible = true, Text = "Dikte" };
         _tray.ContextMenuStrip = new ContextMenuStrip();
         _tray.ContextMenuStrip.Opening += (_, _) => BuildMenu(_tray.ContextMenuStrip);
-        _tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) ToggleFromMenu(); };
+        _tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) OpenWindow(); };
         BuildMenu(_tray.ContextMenuStrip);
 
         _hook = new KeyboardHook(OnKey);
         _watch.Tick += (_, _) => OnWatch();
         _watch.Start();
+        _levelTick.Tick += (_, _) => OnLevelTick();
 
         _settingsWatcher = new FileSystemWatcher(Paths.Dir, Path.GetFileName(Paths.Settings))
         {
@@ -58,13 +70,18 @@ sealed class TrayApp : ApplicationContext
         _settingsWatcher.Changed += (_, _) => _ui.Post(_ => ReloadSettings(), null);
         _settingsWatcher.Created += (_, _) => _ui.Post(_ => ReloadSettings(), null);
 
+        // A second launch of the exe asks this one to show its window.
+        _showRequests = ThreadPool.RegisterWaitForSingleObject(showSignal, (_, _) => _ui.Post(_ => OpenWindow(), null), null, -1, false);
+
         Log.Write($"Started {Application.ProductVersion}, hotkey {_settings.Hotkey}, model {_settings.Model}");
         if (problem is not null) _overlay.ShowMessage("Settings file has a problem", problem, 8);
 
+        // Rewrites the sign-in entry with this exe's path and flags (it may have moved or come from an older version).
+        if (Autostart.Enabled) Autostart.Enabled = true;
+
         _ui.Post(_ =>
         {
-            if (KeyStore.Get() is null) AskForKey();
-            else _tray.ShowBalloonTip(3000, "Dikte is ready", $"Hold {Pretty(_settings.Hotkey)} and speak. Release to paste.", ToolTipIcon.None);
+            if (openWindow || KeyStore.Get() is null) OpenWindow();
         }, null);
     }
 
@@ -74,7 +91,7 @@ sealed class TrayApp : ApplicationContext
     {
         problem = null;
         try { return Settings.LoadOrCreate(Paths.Settings); }
-        catch (Exception e) when (e is FormatException or System.Text.Json.JsonException or IOException)
+        catch (Exception e) when (e is FormatException or JsonException or IOException)
         {
             problem = e.Message;
             Log.Write($"Settings unusable, using defaults: {e.Message}");
@@ -88,7 +105,14 @@ sealed class TrayApp : ApplicationContext
         return new HotkeyMachine(HotkeySpec.Parse(s.Hotkey), lockVk);
     }
 
-    DateTime _lastReload;
+    void Apply(Settings fresh)
+    {
+        bool hotkeyChanged = fresh.Hotkey != _settings.Hotkey || fresh.HandsFreeKey != _settings.HandsFreeKey;
+        _settings = fresh;
+        if (hotkeyChanged && _recorder is null) _machine = NewMachine(fresh);
+        _history = new History(Paths.History, fresh.HistorySize);
+        PushState();
+    }
 
     async void ReloadSettings()
     {
@@ -98,16 +122,34 @@ sealed class TrayApp : ApplicationContext
         await Task.Delay(300);
         try
         {
-            var fresh = Settings.LoadOrCreate(Paths.Settings);
-            _settings = fresh;
-            if (_recorder is null) _machine = NewMachine(fresh);
-            _history = new History(Paths.History, fresh.HistorySize);
-            _overlay.ShowMessage("Settings reloaded", $"Hotkey {Pretty(fresh.Hotkey)} · {fresh.Model}", 2.5);
-            Log.Write($"Settings reloaded: hotkey {fresh.Hotkey}, model {fresh.Model}");
+            Apply(Settings.LoadOrCreate(Paths.Settings));
+            _overlay.ShowMessage("Settings reloaded", $"Hotkey {Pretty(_settings.Hotkey)} · {_settings.Model}", 2.5);
+            Log.Write($"Settings reloaded: hotkey {_settings.Hotkey}, model {_settings.Model}");
         }
-        catch (Exception e) when (e is FormatException or System.Text.Json.JsonException or IOException)
+        catch (Exception e) when (e is FormatException or JsonException or IOException)
         {
             _overlay.ShowMessage("Settings not applied", e.Message, 8);
+        }
+    }
+
+    /// <summary>Merges a partial settings object from the window, checks it, saves it.</summary>
+    void SaveFromWindow(JsonElement patch)
+    {
+        try
+        {
+            var node = JsonSerializer.SerializeToNode(_settings, Settings.Json)!.AsObject();
+            foreach (var prop in patch.EnumerateObject()) node[prop.Name] = JsonNode.Parse(prop.Value.GetRawText());
+            var fresh = node.Deserialize<Settings>(Settings.Json)!;
+            fresh.Validate();
+            _lastReload = DateTime.Now; // our own write: no "reloaded" toast
+            fresh.Save(Paths.Settings);
+            Apply(fresh);
+            _window?.Post(new { type = "toast", text = "Saved" });
+        }
+        catch (Exception e) when (e is FormatException or JsonException or IOException or InvalidOperationException)
+        {
+            _window?.Post(new { type = "toast", text = e.Message });
+            PushState();
         }
     }
 
@@ -139,7 +181,7 @@ sealed class TrayApp : ApplicationContext
 
         if (_recorder is null) return;
         var elapsed = DateTime.Now - _recordingStarted;
-        // Show and sound only once a hold is clearly meant, so Ctrl+Win+Arrow stays silent.
+        // Show, sound and quieten only once a hold is clearly meant, so Ctrl+Win+Arrow stays silent.
         if (!_feedbackShown && elapsed > TimeSpan.FromMilliseconds(180))
         {
             _feedbackShown = true;
@@ -147,12 +189,19 @@ sealed class TrayApp : ApplicationContext
             _overlay.ShowListening(() => recorder.Level);
             if (_machine.IsLocked) _overlay.ShowHandsFree();
             if (_settings.Sounds) Sounds.Start();
+            if (_settings.QuietOtherAudio) _ducker.Duck(_settings.QuietLevel);
+            PushState();
         }
         if (_recorder.Duration.TotalMinutes >= _settings.MaxMinutes)
         {
             _machine.Reset();
             _ = StopAndSendAsync();
         }
+    }
+
+    void OnLevelTick()
+    {
+        if (_window is { Visible: true } && _recorder is not null && _feedbackShown) _window.Post(new { type = "level", v = _recorder.Level });
     }
 
     void Run(HotkeyCommand command)
@@ -166,7 +215,9 @@ sealed class TrayApp : ApplicationContext
                     var recorder = _recorder;
                     _overlay.ShowListening(() => recorder.Level);
                     _overlay.ShowHandsFree();
+                    if (!_feedbackShown && _settings.QuietOtherAudio) _ducker.Duck(_settings.QuietLevel);
                     _feedbackShown = true;
+                    PushState();
                 }
                 break;
             case HotkeyCommand.StopAndSend: _ = StopAndSendAsync(); break;
@@ -174,7 +225,7 @@ sealed class TrayApp : ApplicationContext
         }
     }
 
-    void ToggleFromMenu()
+    void ToggleDictation()
     {
         if (_recorder is null)
         {
@@ -193,13 +244,16 @@ sealed class TrayApp : ApplicationContext
     void StartRecording()
     {
         if (_recorder is not null) return;
+        StopMicTest();
         try
         {
             _recorder = new Recorder(_settings.Microphone);
             _recorder.Start();
             _recordingStarted = DateTime.Now;
             _feedbackShown = false;
+            _errorMessage = _errorHint = null;
             _tray.Icon = _recordingIcon;
+            _levelTick.Start();
         }
         catch (Exception e)
         {
@@ -211,16 +265,24 @@ sealed class TrayApp : ApplicationContext
         }
     }
 
+    void EndRecording()
+    {
+        _levelTick.Stop();
+        _ducker.Restore();
+    }
+
     void CancelRecording()
     {
         var recorder = _recorder;
         _recorder = null;
         if (recorder is null) return;
+        EndRecording();
         _ = recorder.StopAsync().ContinueWith(_ => recorder.Dispose(), TaskScheduler.Default);
         bool wasShown = _feedbackShown;
         UpdateIcon();
         if (wasShown) _overlay.ShowMessage("Cancelled", "", 1.2);
         else _overlay.HideNow();
+        PushState();
     }
 
     async Task StopAndSendAsync()
@@ -228,6 +290,7 @@ sealed class TrayApp : ApplicationContext
         var recorder = _recorder;
         _recorder = null;
         if (recorder is null) return;
+        EndRecording();
         bool wasShown = _feedbackShown;
         byte[] wav;
         float maxLevel;
@@ -254,12 +317,12 @@ sealed class TrayApp : ApplicationContext
         if (length < TimeSpan.FromMilliseconds(400) || !wasShown)
         {
             _overlay.HideNow();
+            PushState();
             return;
         }
         if (maxLevel < 0.015f)
         {
-            _overlay.ShowMessage("No sound from the microphone", "Check the mic in the tray menu", 3);
-            if (_settings.Sounds) Sounds.Error();
+            Fail("No sound from the microphone", "Pick another microphone in Settings");
             return;
         }
         if (_settings.Sounds) Sounds.Stop();
@@ -274,13 +337,9 @@ sealed class TrayApp : ApplicationContext
         if (key is null)
         {
             _failedAudio = wav;
-            AskForKey();
-            key = KeyStore.Get();
-            if (key is null)
-            {
-                _overlay.ShowMessage("No API key", "Kept the recording: Retry from the tray menu", 5);
-                return;
-            }
+            _overlay.ShowMessage("Connect your OpenAI key first", "The recording is kept: retry it from the tray menu", 5);
+            OpenWindow();
+            return;
         }
 
         var settings = _settings;
@@ -293,6 +352,7 @@ sealed class TrayApp : ApplicationContext
         _pending++;
         UpdateIcon();
         if (_recorder is null) _overlay.ShowWorking();
+        PushState();
         var clock = Stopwatch.StartNew();
         try
         {
@@ -311,11 +371,23 @@ sealed class TrayApp : ApplicationContext
                 if (_recorder is null) _overlay.ShowMessage("Nothing to write", "No words were heard", 2);
                 return;
             }
-            if (settings.AppendSpace && !char.IsWhiteSpace(text[^1])) text += " ";
-            _history.Add(text.TrimEnd());
+            int words = CountWords(text);
+            _history.Add(text);
+            _stats.Record(DateTime.Now, words, length.TotalSeconds, settings.Model);
             _failedAudio = null;
-            await Inserter.InsertAsync(text, settings);
-            if (_recorder is null) _overlay.ShowDone($"{CountWords(text)} words");
+
+            if (_window is not null && Native.GetForegroundWindow() == _window.Handle)
+            {
+                // Dictated with Dikte's own window in front: show it there instead of pasting into the page.
+                _window.Post(new { type = "result", text });
+                _overlay.HideNow();
+            }
+            else
+            {
+                if (settings.AppendSpace && !char.IsWhiteSpace(text[^1])) text += " ";
+                await Inserter.InsertAsync(text, settings);
+                if (_recorder is null) _overlay.ShowDone($"{words} words");
+            }
         }
         catch (OperationCanceledException)
         {
@@ -326,7 +398,7 @@ sealed class TrayApp : ApplicationContext
             _failedAudio = wav;
             try { File.WriteAllBytes(Paths.FailedAudio, wav); } catch (IOException) { }
             Log.Write($"Transcription failed: {e.Message}");
-            Fail(e.Message, "Recording kept: Retry from the tray menu");
+            Fail(e.Message, "The recording is kept: Retry from the tray menu");
         }
         catch (Exception e)
         {
@@ -339,6 +411,7 @@ sealed class TrayApp : ApplicationContext
             _pending--;
             done.TrySetResult();
             UpdateIcon();
+            PushState();
         }
     }
 
@@ -350,8 +423,11 @@ sealed class TrayApp : ApplicationContext
 
     void Fail(string title, string hint)
     {
+        _errorMessage = title;
+        _errorHint = hint;
         _overlay.ShowMessage(title, hint, 6);
         if (_settings.Sounds) Sounds.Error();
+        PushState();
     }
 
     void UpdateIcon() =>
@@ -359,85 +435,156 @@ sealed class TrayApp : ApplicationContext
 
     static int CountWords(string text) => text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
 
+    // ---- Window ---------------------------------------------------------------------------------
+
+    void OpenWindow()
+    {
+        if (_window is null || _window.IsDisposed)
+        {
+            _window = new MainWindow();
+            _window.Message += OnWindowMessage;
+            _window.FormClosed += (_, _) =>
+            {
+                StopMicTest();
+                _window = null;
+            };
+        }
+        _window.ShowAndFocus();
+    }
+
+    void OnWindowMessage(JsonElement m)
+    {
+        switch (m.GetProperty("type").GetString())
+        {
+            case "ready": PushState(); break;
+            case "save": SaveFromWindow(m.GetProperty("settings")); break;
+            case "setKey": _ = SetKeyAsync(m.GetProperty("key").GetString() ?? ""); break;
+            case "toggleDictation": ToggleDictation(); break;
+            case "copy": Clipboard.SetText(m.GetProperty("text").GetString() ?? ""); break;
+            case "clearHistory": _history.Clear(); PushState(); break;
+            case "autostart": Autostart.Enabled = m.GetProperty("on").GetBoolean(); PushState(); break;
+            case "micTest": StartMicTest(); break;
+            case "openUrl": MainWindow.OpenUrl(m.GetProperty("url").GetString() ?? ""); break;
+            case "openLog": Open(Paths.Log); break;
+            case "openSettingsFile": Open(Paths.Settings); break;
+        }
+    }
+
+    async Task SetKeyAsync(string key)
+    {
+        key = key.Trim();
+        string? problem;
+        using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20)))
+        {
+            try { problem = await _api.CheckKeyAsync(_settings, key, cts.Token); }
+            catch (OperationCanceledException) { problem = "The API did not answer in time."; }
+        }
+        if (problem is null)
+        {
+            KeyStore.Save(key);
+            Log.Write("API key saved.");
+        }
+        _window?.Post(new { type = "keyResult", ok = problem is null, message = problem ?? "" });
+        PushState();
+    }
+
+    void PushState()
+    {
+        if (_window is null || _window.IsDisposed) return;
+        var key = KeyStore.Get();
+        var stats = _stats.Summary(DateTime.Now);
+        string status =
+            _recorder is not null && _feedbackShown ? (_machine.IsLocked ? "handsfree" : "listening")
+            : _pending > 0 ? "working"
+            : _errorMessage is not null ? "error"
+            : "idle";
+        IReadOnlyList<string> devices;
+        try { devices = Recorder.Devices(); }
+        catch (Exception) { devices = Array.Empty<string>(); }
+
+        _window.Post(new
+        {
+            type = "state",
+            state = new
+            {
+                status,
+                message = _errorMessage,
+                hint = _errorHint,
+                hasKey = key is not null,
+                keyHint = key is { Length: > 8 } ? "…" + key[^4..] : "",
+                settings = _settings,
+                devices,
+                languages = Languages.Known.Select(l => new[] { l.Code, l.Name }),
+                history = _history.Items.Select(h => new { time = When(h.At), text = h.Text }),
+                stats,
+                autostart = Autostart.Enabled,
+            },
+        });
+    }
+
+    static string When(DateTime at) =>
+        at.Date == DateTime.Today ? at.ToString("HH:mm", CultureInfo.InvariantCulture)
+        : at.Date == DateTime.Today.AddDays(-1) ? "Yesterday"
+        : at.ToString("d MMM", CultureInfo.InvariantCulture);
+
+    void StartMicTest()
+    {
+        if (_recorder is not null || _micTest is not null) return;
+        try
+        {
+            var test = new Recorder(_settings.Microphone);
+            test.Start();
+            _micTest = test;
+            var started = DateTime.Now;
+            var tick = new System.Windows.Forms.Timer { Interval = 50 };
+            tick.Tick += (_, _) =>
+            {
+                if (_micTest != test || DateTime.Now - started > TimeSpan.FromSeconds(5))
+                {
+                    tick.Dispose();
+                    if (_micTest == test) StopMicTest();
+                    _window?.Post(new { type = "micLevel", v = 0 });
+                    return;
+                }
+                _window?.Post(new { type = "micLevel", v = test.Level });
+            };
+            tick.Start();
+        }
+        catch (Exception e)
+        {
+            Log.Write($"Microphone test failed: {e.Message}");
+            _window?.Post(new { type = "toast", text = "That microphone could not be opened" });
+        }
+    }
+
+    void StopMicTest()
+    {
+        var test = _micTest;
+        _micTest = null;
+        if (test is null) return;
+        _ = test.StopAsync().ContinueWith(_ => test.Dispose(), TaskScheduler.Default);
+    }
+
     // ---- Menu -----------------------------------------------------------------------------------
 
     void BuildMenu(ContextMenuStrip menu)
     {
         menu.Items.Clear();
-        menu.Items.Add(new ToolStripMenuItem($"Hold {Pretty(_settings.Hotkey)} to dictate") { Enabled = false });
-        menu.Items.Add(_recorder is null ? "Start hands-free dictation" : "Stop and send", null, (_, _) => ToggleFromMenu());
+        var open = new ToolStripMenuItem("Open Dikte", null, (_, _) => OpenWindow());
+        open.Font = new Font(open.Font, FontStyle.Bold);
+        menu.Items.Add(open);
+        menu.Items.Add(_recorder is null ? "Start hands-free dictation" : "Stop and send", null, (_, _) => ToggleDictation());
         if (_failedAudio is not null) menu.Items.Add("Retry last recording", null, (_, _) => RetryFailed());
         menu.Items.Add(new ToolStripSeparator());
-
-        var recent = new ToolStripMenuItem("Recent (click to copy)");
-        if (_history.Items.Count == 0) recent.DropDownItems.Add(new ToolStripMenuItem("Nothing yet") { Enabled = false });
-        foreach (var entry in _history.Items)
-        {
-            var label = entry.Text.Length > 70 ? entry.Text[..67] + "…" : entry.Text;
-            var text = entry.Text;
-            recent.DropDownItems.Add($"{entry.At:HH:mm}  {label.Replace("&", "&&")}", null, (_, _) => Clipboard.SetText(text));
-        }
-        if (_history.Items.Count > 0)
-        {
-            recent.DropDownItems.Add(new ToolStripSeparator());
-            recent.DropDownItems.Add("Clear", null, (_, _) => _history.Clear());
-        }
-        menu.Items.Add(recent);
-
-        var mics = new ToolStripMenuItem("Microphone");
-        mics.DropDownItems.Add(MicItem("Windows default", ""));
-        try
-        {
-            foreach (var name in Recorder.Devices()) mics.DropDownItems.Add(MicItem(name, name));
-        }
-        catch (Exception e) { Log.Write($"Listing microphones failed: {e.Message}"); }
-        menu.Items.Add(mics);
-
-        var cleanup = new ToolStripMenuItem("Tidy up text (remove ums, fix punctuation)") { Checked = _settings.Cleanup };
-        cleanup.Click += (_, _) => Change(s => s.Cleanup = !s.Cleanup);
-        menu.Items.Add(cleanup);
-        var sounds = new ToolStripMenuItem("Sounds") { Checked = _settings.Sounds };
-        sounds.Click += (_, _) => Change(s => s.Sounds = !s.Sounds);
-        menu.Items.Add(sounds);
-        var autostart = new ToolStripMenuItem("Start with Windows") { Checked = Autostart.Enabled };
-        autostart.Click += (_, _) => Autostart.Enabled = !Autostart.Enabled;
-        menu.Items.Add(autostart);
-
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Set API key…", null, (_, _) => AskForKey());
-        menu.Items.Add("Edit settings…", null, (_, _) => Open(Paths.Settings));
-        menu.Items.Add("Open log", null, (_, _) => Open(Paths.Log));
-        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Quit", null, (_, _) => ExitThread());
-    }
-
-    ToolStripMenuItem MicItem(string label, string value)
-    {
-        var item = new ToolStripMenuItem(label) { Checked = string.Equals(_settings.Microphone, value, StringComparison.OrdinalIgnoreCase) };
-        item.Click += (_, _) => Change(s => s.Microphone = value);
-        return item;
-    }
-
-    void Change(Action<Settings> edit)
-    {
-        edit(_settings);
-        _lastReload = DateTime.Now; // our own write: no "reloaded" toast
-        try { _settings.Save(Paths.Settings); }
-        catch (IOException e) { Log.Write($"Saving settings failed: {e.Message}"); }
     }
 
     void RetryFailed()
     {
         var wav = _failedAudio;
         if (wav is null) return;
+        _errorMessage = _errorHint = null;
         _ = ProcessAsync(wav, TimeSpan.FromSeconds((wav.Length - 44) / (Recorder.SampleRate * 2.0)));
-    }
-
-    void AskForKey()
-    {
-        using var dialog = new ApiKeyDialog(_api, _settings);
-        if (dialog.ShowDialog() == DialogResult.OK)
-            _tray.ShowBalloonTip(3000, "Dikte is ready", $"Hold {Pretty(_settings.Hotkey)} and speak. Release to paste.", ToolTipIcon.None);
     }
 
     static void Open(string path)
@@ -447,15 +594,20 @@ sealed class TrayApp : ApplicationContext
     }
 
     static string Pretty(string hotkey) =>
-        string.Join(" + ", hotkey.Split('+', StringSplitOptions.TrimEntries).Select(p => p.Length <= 1 ? p.ToUpperInvariant() : char.ToUpperInvariant(p[0]) + p[1..]));
+        string.Join(" + ", hotkey.Split('+', StringSplitOptions.TrimEntries).Select(p => p.Length <= 2 ? p.ToUpperInvariant() : char.ToUpperInvariant(p[0]) + p[1..]));
 
     protected override void ExitThreadCore()
     {
         _hook?.Dispose();
         _hook = null;
+        _showRequests.Unregister(null);
         _watch.Stop();
+        _levelTick.Stop();
         _settingsWatcher.Dispose();
         _recorder?.Dispose();
+        StopMicTest();
+        _ducker.RestoreAndWait(TimeSpan.FromSeconds(2));
+        _window?.Close();
         _tray.Visible = false;
         _tray.Dispose();
         _overlay.Dispose();

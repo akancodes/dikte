@@ -10,6 +10,7 @@ static class Paths
     public static readonly string Settings = Path.Combine(Dir, "settings.json");
     public static readonly string ApiKey = Path.Combine(Dir, "api-key.bin");
     public static readonly string History = Path.Combine(Dir, "history.json");
+    public static readonly string Stats = Path.Combine(Dir, "stats.json");
     public static readonly string FailedAudio = Path.Combine(Dir, "last-failed.wav");
     public static readonly string Log = Path.Combine(Dir, "dikte.log");
 }
@@ -81,7 +82,8 @@ static class Autostart
         set
         {
             using var key = Registry.CurrentUser.CreateSubKey(RunKey);
-            if (value) key.SetValue(Name, $"\"{Environment.ProcessPath}\"");
+            // --background: at sign-in it waits in the tray instead of opening its window.
+            if (value) key.SetValue(Name, $"\"{Environment.ProcessPath}\" --background");
             else key.DeleteValue(Name, throwOnMissingValue: false);
         }
     }

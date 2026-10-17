@@ -23,6 +23,9 @@ with `gpt-transcribe` an hour of talking costs about **$0.27**.
 2. Paste your API key when it asks. It is checked, then stored encrypted for your Windows user (DPAPI).
 3. Click into any text field and **hold `Ctrl + Win`**, speak, release.
 
+The window (open it from the tray icon or by starting `Dikte.exe` again) shows what it is doing, your recent
+dictations and what you have spent, and holds every setting. Closing it leaves Dikte running in the tray.
+
 | Do this | And |
 |---|---|
 | Hold `Ctrl + Win` | Listens while you hold, pastes when you let go |
@@ -31,22 +34,23 @@ with `gpt-transcribe` an hour of talking costs about **$0.27**.
 | Left-click the tray icon | Starts/stops hands-free dictation with the mouse |
 
 A short hold that turns into a shortcut (`Ctrl + Win + →`, `Ctrl + Win + D`...) is cancelled silently and the shortcut
-works as usual. Mixed languages are fine: leave `language` empty and the model follows you between Turkish and English
-mid-sentence.
+works as usual. Mixing languages is fine: pick the ones you speak in Settings and the model is told to write each word
+in the language it was spoken, never translating (measured: it keeps "refactor" English in a Turkish sentence).
 
-The tray menu has the last 20 transcripts (click one to copy it again), the microphone picker, **Retry last recording**
-when the network failed (the audio is kept), an optional tidy-up pass, sounds, and start with Windows.
+While you talk, music and videos are turned down (to 15% by default, or muted) and come back when you let go.
+If the network fails the recording is kept: **Retry last recording** is in the tray menu.
 
 ## Settings
 
-`%APPDATA%\Dikte\settings.json`, opened from the tray menu. Saved changes apply at once.
+Everything is in the window's Settings tab; it is stored in `%APPDATA%\Dikte\settings.json`, which can also be edited
+by hand (changes apply at once).
 
 | Key | Default | |
 |---|---|---|
 | `hotkey` | `ctrl+win` | Any combination: `rctrl`, `f8`, `ctrl+shift+space`, `ralt+f12`... |
 | `handsFreeKey` | `space` | Pressed while holding the hotkey |
 | `model` | `gpt-transcribe` | Also `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1` |
-| `language` | `""` | Empty = detect; `tr`, `en`... pins it |
+| `languages` | `[]` | Codes of the languages you speak: none = detect, one = pinned, several = mixed freely |
 | `vocabulary` | `Claude Code, ...` | Names and terms to spell your way, sent as the model's prompt |
 | `apiBase` | `https://api.openai.com/v1` | Any OpenAI-compatible server, e.g. `https://api.groq.com/openai/v1` with `whisper-large-v3-turbo` |
 | `insertMode` | `paste` | `paste` (clipboard + shortcut, the clipboard is restored) or `type` (key by key, leaves the clipboard alone) |
@@ -56,6 +60,8 @@ when the network failed (the audio is kept), an optional tidy-up pass, sounds, a
 | `appendSpace` | `true` | So two dictations in a row do not run together |
 | `microphone` | `""` | Empty = the Windows default |
 | `sounds` | `true` | |
+| `quietOtherAudio` | `true` | Turn other apps down while recording (their own mixer sliders, put back afterwards) |
+| `quietLevel` | `0.15` | What they are turned down to: `0` mutes |
 | `maxMinutes` | `10` | A recording stops and sends itself at this length |
 
 ## Privacy
@@ -82,8 +88,9 @@ dotnet publish src/Dikte -c Release -o dist   # dist/Dikte.exe, self-contained, 
 ```
 
 `src/Dikte/Core` is plain .NET (no Windows APIs) and is what the tests cover; the rest is the Windows shell around it:
-a low-level keyboard hook, `waveIn` recording at 16 kHz mono through NAudio, `SendInput` for pasting, and a WinForms
-overlay that never takes focus. Releases are built by GitHub Actions on a `v*` tag.
+a low-level keyboard hook, `waveIn` recording at 16 kHz mono through NAudio, per-app volume through WASAPI,
+`SendInput` for pasting, a WinForms overlay that never takes focus, and the window: one HTML page (`src/Dikte/ui`)
+in WebView2, which Windows 11 already has. Releases are built by GitHub Actions on a `v*` tag.
 
 ## License
 
