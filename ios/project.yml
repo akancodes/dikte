@@ -61,6 +61,19 @@ targets:
         # XcodeGen's preset says "1,2": the upload then fails on iPad orientations.
         TARGETED_DEVICE_FAMILY: "1"
 
+  # Renders the keyboard in the simulator to PNGs (CI uploads them), since nothing here can run iOS.
+  KeyboardSnapshots:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Snapshots, Keyboard, Shared]
+    dependencies:
+      - target: Dikte
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.akan.dikte.ios.snapshots
+        GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1"
+
   DikteKeyboard:
     type: app-extension
     platform: iOS
@@ -90,3 +103,11 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.akan.dikte.ios.keyboard
         TARGETED_DEVICE_FAMILY: "1"
+
+schemes:
+  KeyboardSnapshots:
+    build:
+      targets:
+        KeyboardSnapshots: [test]
+    test:
+      targets: [KeyboardSnapshots]

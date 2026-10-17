@@ -432,6 +432,20 @@ final class KeyboardModel: ObservableObject {
         if case .message = status { status = .idle }
     }
 
+    #if DEBUG
+    /// Puts the model in a given state, for the snapshot tests.
+    func stage(status: Status = .idle, panel: Panel? = nil, suggestions: [String] = [], misspelled: Bool = false,
+               sessionOn: Bool = true, lastText: String? = nil) {
+        self.status = status
+        self.panel = panel
+        self.suggestions = suggestions
+        self.misspelled = misspelled
+        self.sessionOn = sessionOn
+        self.lastText = lastText
+        listeningSince = Date().addingTimeInterval(-7)
+    }
+    #endif
+
     func updateSuggestions() {
         let word = Speller.currentWord(controller?.contextBefore ?? "")
         let result = Speller.suggestions(for: word, layout: layout)
