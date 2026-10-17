@@ -6,11 +6,8 @@ on:
     tags: ['v*']
   pull_request:
 
-permissions:
-  contents: write
-
 jobs:
-  build:
+  windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,11 +18,35 @@ jobs:
       - run: dotnet publish src/Dikte -c Release -o dist
       - uses: actions/upload-artifact@v4
         with:
-          name: Dikte
+          name: Dikte-windows
           path: dist/Dikte.exe
+
+  mac:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift --version
+      - run: swift test --package-path mac
+      - run: mac/build-app.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Dikte-mac
+          path: dist/Dikte-mac.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, mac]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
       - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: gh release create "$GITHUB_REF_NAME" dist/Dikte.exe --title "Dikte ${GITHUB_REF_NAME#v}" --generate-notes
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/Dikte.exe dist/Dikte-mac.zip \
+            --repo "$GITHUB_REPOSITORY" --title "Dikte ${GITHUB_REF_NAME#v}" --generate-notes

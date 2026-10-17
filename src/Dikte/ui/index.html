@@ -163,7 +163,11 @@ details.card summary::after { content: "Show"; float: right; color: var(--muted)
 details.card[open] summary::after { content: "Hide"; }
 details .adv { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px 16px; margin-top: 14px; }
 details .adv label { font-size: 12.5px; color: var(--muted); display: grid; gap: 4px; }
-.key { font-family: "Cascadia Mono", Consolas, monospace; background: var(--soft); padding: 2px 8px; border-radius: 6px; }
+.key { font-family: "Cascadia Mono", Consolas, ui-monospace, Menlo, monospace; background: var(--soft); padding: 2px 8px; border-radius: 6px; }
+
+.notice { display: flex; align-items: center; gap: 14px; margin-top: 14px; padding: 14px 18px; border-radius: 16px;
+  background: var(--panel); box-shadow: var(--shadow); border-left: 4px solid var(--amber); }
+.notice div { flex: 1; } .notice b { display: block; font-weight: 600; } .notice small { color: var(--muted); font-size: 12.5px; }
 
 .toast { position: fixed; left: 50%; bottom: 18px; transform: translate(-50%, 20px); background: #18181b; color: #fff; padding: 8px 16px;
   border-radius: 99px; font-size: 13px; opacity: 0; transition: .25s; pointer-events: none; }
@@ -245,7 +249,7 @@ details .adv label { font-size: 12.5px; color: var(--muted); display: grid; gap:
 
       <div class="card">
         <h3>App</h3>
-        <div class="row"><label>Start with Windows<small>Waits in the notification area</small></label>
+        <div class="row"><label id="autostartLabel">Start with Windows<small>Waits in the notification area</small></label>
           <span class="toggle"><input type="checkbox" id="autostart"><span></span></span></div>
         <div class="row"><label>OpenAI key<small id="keyInfo"></small></label><button class="btn" id="changeKey">Change</button></div>
         <div id="keyBox" style="display:none;padding-top:6px">
@@ -267,7 +271,7 @@ details .adv label { font-size: 12.5px; color: var(--muted); display: grid; gap:
           <label>API address<input class="field" id="apiBase"></label>
           <label>How text goes in
             <select class="field" id="insertMode"><option value="paste">Paste (clipboard is put back)</option><option value="type">Type it key by key</option></select></label>
-          <label>Paste shortcut
+          <label id="pasteShortcutBox">Paste shortcut
             <select class="field" id="pasteShortcut"><option value="ctrl+v">Ctrl + V</option><option value="ctrl+shift+v">Ctrl + Shift + V</option><option value="shift+insert">Shift + Insert</option></select></label>
           <label>Longest recording (minutes)<input class="field" id="maxMinutes" type="number" min="1" max="12"></label>
           <label>Tidy-up model<input class="field" id="cleanupModel"></label>
@@ -291,7 +295,11 @@ const KEY_NAMES = { ctrl: "Ctrl", win: "Win", alt: "Alt", shift: "Shift", rctrl:
   ralt: "Right Alt", lalt: "Left Alt", rshift: "Right Shift", lshift: "Left Shift", rwin: "Right Win", lwin: "Left Win",
   space: "Space", capslock: "Caps Lock", scrolllock: "Scroll Lock", pause: "Pause", pageup: "Page Up", pagedown: "Page Down",
   mouse3: "Middle click", middle: "Middle click", mouse4: "Mouse 4", mouse5: "Mouse 5", apps: "Menu", enter: "Enter", tab: "Tab",
-  insert: "Insert", home: "Home", end: "End" };
+  insert: "Insert", home: "Home", end: "End",
+  // macOS
+  fn: "Fn", globe: "Fn", cmd: "Cmd", command: "Cmd", lcmd: "Left Cmd", rcmd: "Right Cmd", opt: "Option", option: "Option",
+  lopt: "Left Option", ropt: "Right Option", control: "Ctrl", return: "Return" };
+const mac = () => S?.platform === "mac";
 const keyName = p => KEY_NAMES[p.toLowerCase()] ?? p.toUpperCase();
 
 // ---------- tabs ----------
@@ -325,8 +333,9 @@ function render() {
   $("hero").className = "hero " + (S.hasKey ? st : "idle");
   const pill = { idle: ["Ready", "var(--green)"], listening: ["Listening", "var(--red)"], handsfree: ["Hands-free", "var(--orange)"],
     working: ["Transcribing", "var(--blue)"], error: ["Needs a look", "var(--amber)"] }[S.hasKey ? st : "error"];
-  $("pill").querySelector("span").textContent = S.hasKey ? pill[0] : "Not connected";
-  $("pill").querySelector("i").style.background = pill[1];
+  const blocked = mac() && !S.permissions.accessibility;
+  $("pill").querySelector("span").textContent = blocked ? "Needs permission" : S.hasKey ? pill[0] : "Not connected";
+  $("pill").querySelector("i").style.background = blocked ? "var(--amber)" : pill[1];
   renderHero();
   renderBelow();
   renderSettings();
@@ -335,6 +344,16 @@ function render() {
 function renderHero() {
   if (!S) return;
   const h = $("heroText");
+  if (mac() && !S.permissions.accessibility) {
+    if (h.dataset.mode === "permission") return;
+    h.dataset.mode = "permission";
+    h.innerHTML = `<h1>Let Dikte hear the shortcut</h1>
+      <p>macOS asks once. In System Settings → Privacy &amp; Security → Accessibility, turn on <b>Dikte</b>.
+      It is used to notice the shortcut and to paste the text, nothing else. After an update, remove Dikte there with − and turn it on again.</p>
+      <div class="connect"><button class="btn-white" id="openAccess" style="padding:12px 20px">Open System Settings</button></div>`;
+    $("openAccess").onclick = () => send({ type: "openPermission", which: "accessibility" });
+    return;
+  }
   if (!S.hasKey) {
     if (h.dataset.mode === "connect") return;   // keep what is being typed
     h.dataset.mode = "connect";
@@ -367,6 +386,12 @@ function renderHero() {
 function renderBelow() {
   const s = S.stats, b = $("below");
   let html = "";
+  if (mac() && S.permissions.microphone === "denied")
+    html += `<div class="notice"><div><b>Microphone access is off</b><small>System Settings → Privacy &amp; Security → Microphone → turn on Dikte</small></div>
+      <button class="btn" data-permission="microphone">Open settings</button></div>`;
+  if (mac() && S.globeHint)
+    html += `<div class="notice"><div><b>Does holding Fn also open emoji or switch the keyboard language?</b><small>Set System Settings → Keyboard → “Press 🌐 key to” → Do Nothing, so it only talks.</small></div>
+      <button class="btn" data-permission="keyboard">Keyboard settings</button></div>`;
   if (s.totalCount > 0) {
     html += `<div class="tiles">
       <div class="tile"><b>${s.weekWords.toLocaleString()}</b><span>words this week</span></div>
@@ -385,6 +410,7 @@ function renderBelow() {
         <button class="copy" data-copy="${i}">Copy</button></div>`).join("") + `</div>`;
   }
   b.innerHTML = html;
+  b.querySelectorAll("[data-permission]").forEach(x => x.onclick = () => send({ type: "openPermission", which: x.dataset.permission }));
   b.querySelectorAll("[data-copy]").forEach(x => x.onclick = () => { send({ type: "copy", text: S.history[+x.dataset.copy].text }); toast("Copied"); });
   b.querySelectorAll(".item .t").forEach(x => x.onclick = () => x.parentElement.classList.toggle("open"));
   $("clearHistory") && ($("clearHistory").onclick = () => send({ type: "clearHistory" }));
@@ -425,13 +451,17 @@ function renderSettings() {
   });
 
   const sel = $("mic-select");
-  const opts = [["", "Windows default"], ...S.devices.map(d => [d, d])];
+  const opts = [["", mac() ? "System default" : "Windows default"], ...S.devices.map(d => [d, d])];
   const html = opts.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join("");
   if (sel.dataset.html !== html) { sel.innerHTML = html; sel.dataset.html = html; }
   setIfIdle(sel, c.microphone);
 
   for (const id of ["quietOtherAudio", "sounds", "cleanup", "appendSpace"]) $(id).checked = c[id];
   $("autostart").checked = S.autostart;
+  if (mac()) {
+    $("autostartLabel").innerHTML = "Open at login<small>Waits in the menu bar</small>";
+    $("pasteShortcutBox").style.display = "none";
+  }
   $("quietBox").style.display = c.quietOtherAudio ? "block" : "none";
   setIfIdle($("quietLevel"), Math.round(c.quietLevel * 100));
   $("quietValue").textContent = c.quietLevel === 0 ? "Muted" : `${Math.round(c.quietLevel * 100)}% of their volume`;
