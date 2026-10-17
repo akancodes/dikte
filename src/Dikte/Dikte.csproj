@@ -43,6 +43,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="ui/index.html" LogicalName="index.html" />
+    <EmbeddedResource Include="Assets/tray-*.ico" LogicalName="%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

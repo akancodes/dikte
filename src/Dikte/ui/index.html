@@ -7,7 +7,7 @@
 <style>
 :root {
   --bg: #f6f6f7; --panel: #ffffff; --line: #e6e6ea; --text: #18181b; --muted: #6b6b76; --soft: #f0f0f3;
-  --red: #ef4444; --orange: #f97316; --blue: #3b82f6; --green: #22c55e; --amber: #f59e0b;
+  --violet: #7c3aed; --red: #ef4444; --orange: #f97316; --blue: #3b82f6; --green: #22c55e; --amber: #f59e0b;
   --chip: #f1f1f4; --chip-on: #18181b; --chip-on-text: #fff;
   --shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.05);
   --mark: #18181b;
@@ -18,7 +18,7 @@
     --bg: #111113; --panel: #1a1a1d; --line: #2a2a2f; --text: #f4f4f5; --muted: #9b9ba6; --soft: #222226;
     --chip: #26262b; --chip-on: #f4f4f5; --chip-on-text: #111113;
     --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.25);
-    --mark: #2e2e35;
+    --mark: #2e2e35; --violet: #a78bfa;
     color-scheme: dark;
   }
 }
@@ -32,8 +32,10 @@ button { cursor: pointer; }
 /* ---------- top bar ---------- */
 header { display: flex; align-items: center; gap: 16px; padding: 14px 24px 10px; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 16px; letter-spacing: -.01em; }
-.brand-mark { width: 26px; height: 26px; border-radius: 8px; background: var(--mark); display: grid; place-items: center; }
-.brand-mark i { width: 7px; height: 12px; border-radius: 4px; background: var(--red); display: block; }
+.brand-mark { width: 26px; height: 26px; border-radius: 8px; background: linear-gradient(135deg, #8b5cf6, #4c1d95);
+  display: flex; align-items: center; justify-content: center; gap: 2px; }
+.brand-mark i { width: 3px; border-radius: 2px; background: #fff; display: block; height: 8px; }
+.brand-mark i:nth-child(2) { height: 14px; }
 .tabs { display: flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--soft); margin-left: 8px; }
 .tabs button { border: 0; background: transparent; padding: 6px 14px; border-radius: 8px; color: var(--muted); font-weight: 550; }
 .tabs button.on { background: var(--panel); color: var(--text); box-shadow: var(--shadow); }
@@ -49,7 +51,7 @@ main::-webkit-scrollbar { width: 10px; } main::-webkit-scrollbar-thumb { backgro
 /* ---------- hero ---------- */
 .hero { position: relative; overflow: hidden; border-radius: 22px; padding: 30px 32px 0; min-height: 250px; color: #fff;
   display: grid; grid-template-columns: auto 1fr; grid-template-rows: 1fr auto; column-gap: 28px;
-  background: radial-gradient(120% 140% at 0% 0%, #3a3a46 0%, #1c1c22 55%, #141418 100%);
+  background: radial-gradient(120% 140% at 0% 0%, #7c5cf0 0%, #4a2aa8 48%, #261463 100%);
   box-shadow: var(--shadow); transition: background .4s; }
 .hero.listening { background: radial-gradient(120% 140% at 0% 0%, #ff6b5b 0%, #e5352b 45%, #a3171f 100%); }
 .hero.handsfree { background: radial-gradient(120% 140% at 0% 0%, #ffa24a 0%, #f2711c 45%, #b9480d 100%); }
@@ -116,6 +118,20 @@ main::-webkit-scrollbar { width: 10px; } main::-webkit-scrollbar-thumb { backgro
 .card { background: var(--panel); border-radius: 16px; padding: 18px 20px; box-shadow: var(--shadow); }
 .card h3 { margin: 0 0 4px; font-size: 14.5px; font-weight: 650; }
 .card .sub { color: var(--muted); font-size: 12.5px; margin: 0 0 14px; }
+.bind { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 6px 12px; padding: 12px 0; }
+.bind + .bind { border-top: 1px solid var(--line); }
+.bind .what b { display: block; font-weight: 600; } .bind .what small { color: var(--muted); font-size: 12.5px; }
+.bind .acts { display: flex; gap: 6px; }
+.bind .caps { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 38px; }
+.cap { display: inline-flex; align-items: center; padding: 5px 12px; border-radius: 9px; background: var(--chip); font-weight: 650;
+  border: 1px solid var(--line); border-bottom-width: 3px; }
+.cap-plus { color: var(--muted); }
+.none { color: var(--muted); }
+.listen { display: flex; align-items: center; gap: 10px; padding: 7px 14px; border-radius: 10px; font-weight: 600;
+  background: color-mix(in srgb, var(--violet) 14%, transparent); color: var(--violet); }
+.listen i { width: 9px; height: 9px; border-radius: 50%; background: var(--violet); animation: blink 1s ease-in-out infinite; }
+@keyframes blink { 50% { opacity: .25; } }
+.btn.quiet { border-color: transparent; background: transparent; color: var(--muted); }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip { border: 0; background: var(--chip); padding: 7px 13px; border-radius: 99px; font-weight: 550; font-size: 13.5px; }
 .chip.on { background: var(--chip-on); color: var(--chip-on-text); }
@@ -163,7 +179,7 @@ details .adv label { font-size: 12.5px; color: var(--muted); display: grid; gap:
 </head>
 <body>
 <header>
-  <div class="brand"><div class="brand-mark"><i></i></div>Dikte</div>
+  <div class="brand"><div class="brand-mark"><i></i><i></i><i></i></div>Dikte</div>
   <nav class="tabs"><button data-tab="home" class="on">Home</button><button data-tab="settings">Settings</button></nav>
   <div class="spacer"></div>
   <div class="pill" id="pill"><i></i><span>Ready</span></div>
@@ -184,10 +200,10 @@ details .adv label { font-size: 12.5px; color: var(--muted); display: grid; gap:
   <section class="view" id="settings">
     <div class="grid">
       <div class="card">
-        <h3>Shortcut</h3>
-        <p class="sub">Hold it to talk. While holding, <b>Space</b> keeps it listening hands-free; <b>Esc</b> cancels.</p>
-        <div class="chips" id="hotkeys"></div>
-        <input class="field" id="hotkeyCustom" placeholder="e.g. ctrl+shift+space, ralt, f9" style="margin-top:10px;display:none">
+        <h3>Shortcuts</h3>
+        <p class="sub">Any key, key combination or mouse button. <b>Esc</b> cancels a recording.</p>
+        <div class="bind" id="bind-hotkey"></div>
+        <div class="bind" id="bind-toggleHotkey"></div>
       </div>
 
       <div class="card">
@@ -271,11 +287,11 @@ let levels = new Array(90).fill(0);
 let lastResult = "";
 let showAllLangs = false;
 
-// Right Alt is left out on purpose: on Turkish and many European layouts it is AltGr, which types @, € and more.
-const PRESETS = [["ctrl+win", "Ctrl + Win"], ["rctrl", "Right Ctrl"], ["f8", "F8"]];
 const KEY_NAMES = { ctrl: "Ctrl", win: "Win", alt: "Alt", shift: "Shift", rctrl: "Right Ctrl", lctrl: "Left Ctrl",
   ralt: "Right Alt", lalt: "Left Alt", rshift: "Right Shift", lshift: "Left Shift", rwin: "Right Win", lwin: "Left Win",
-  space: "Space", capslock: "Caps Lock", scrolllock: "Scroll Lock", pause: "Pause" };
+  space: "Space", capslock: "Caps Lock", scrolllock: "Scroll Lock", pause: "Pause", pageup: "Page Up", pagedown: "Page Down",
+  mouse3: "Middle click", middle: "Middle click", mouse4: "Mouse 4", mouse5: "Mouse 5", apps: "Menu", enter: "Enter", tab: "Tab",
+  insert: "Insert", home: "Home", end: "End" };
 const keyName = p => KEY_NAMES[p.toLowerCase()] ?? p.toUpperCase();
 
 // ---------- tabs ----------
@@ -340,7 +356,11 @@ function renderHero() {
   else if (st === "handsfree") { title = "Listening hands-free"; sub = `Press ${esc(pretty(S.settings.hotkey))} or the mic to send · Esc: cancel`; }
   else if (st === "working") { title = "Writing it down…"; sub = "Esc cancels"; }
   else if (st === "error") { title = esc(S.message || "Something went wrong"); sub = esc(S.hint || ""); }
-  else { title = `Hold ${keycaps(S.settings.hotkey)}`; sub = "Talk, then let go: your words land wherever you are typing. Or click the mic."; }
+  else {
+    title = `Hold ${keycaps(S.settings.hotkey)}`;
+    sub = "Talk, then let go: your words land wherever you are typing." +
+      (S.settings.toggleHotkey ? ` Or tap <b>${esc(pretty(S.settings.toggleHotkey))}</b> to talk hands-free, and tap again to send.` : " Or click the mic.");
+  }
   h.innerHTML = `<h1>${title}</h1><p>${sub}</p>` + (lastResult && st === "idle" ? `<div class="result">${esc(lastResult)}</div>` : "");
 }
 
@@ -374,16 +394,24 @@ const pretty = hk => hk.split("+").map(p => keyName(p.trim())).join(" + ");
 
 function setIfIdle(el, value, prop = "value") { if (document.activeElement !== el) el[prop] = value; }
 
+const capsOf = hk => hk.split("+").map(p => `<span class="cap">${esc(keyName(p.trim()))}</span>`).join('<span class="cap-plus">+</span>');
+
+function renderBind(target, title, help, value, optional) {
+  const el = $("bind-" + target), listening = S.capture === target;
+  const caps = listening ? `<span class="listen"><i></i>Press a key, a combination or a mouse button…</span>`
+    : value ? capsOf(value) : `<span class="none">Not set</span>`;
+  const acts = listening ? `<button class="btn" data-cancel>Cancel</button>`
+    : `<button class="btn" data-capture>${value ? "Change" : "Set"}</button>` + (optional && value ? `<button class="btn quiet" data-clear>Remove</button>` : "");
+  el.innerHTML = `<div class="what"><b>${title}</b><small>${help}</small></div><div class="acts">${acts}</div><div class="caps">${caps}</div>`;
+  el.querySelector("[data-capture]")?.addEventListener("click", e => { e.currentTarget.blur(); send({ type: "capture", target }); });
+  el.querySelector("[data-cancel]")?.addEventListener("click", () => send({ type: "captureCancel" }));
+  el.querySelector("[data-clear]")?.addEventListener("click", () => save({ [target]: "" }));
+}
+
 function renderSettings() {
   const c = S.settings;
-  const custom = !PRESETS.some(p => p[0] === c.hotkey);
-  $("hotkeys").innerHTML = PRESETS.map(([v, l]) => `<button class="chip ${c.hotkey === v ? "on" : ""}" data-hk="${v}">${l}</button>`).join("") +
-    `<button class="chip ${custom ? "on" : ""}" data-hk="">Other…</button>`;
-  $("hotkeys").querySelectorAll("[data-hk]").forEach(b => b.onclick = () => {
-    if (b.dataset.hk) { $("hotkeyCustom").style.display = "none"; save({ hotkey: b.dataset.hk }); }
-    else { $("hotkeyCustom").style.display = "block"; $("hotkeyCustom").focus(); }
-  });
-  if (custom) { $("hotkeyCustom").style.display = "block"; setIfIdle($("hotkeyCustom"), c.hotkey); }
+  renderBind("hotkey", "Hold to talk", "Listens while held, sends when let go. Space while holding: hands-free.", c.hotkey, false);
+  renderBind("toggleHotkey", "Tap to start, tap to send", "One press starts listening hands-free, the next sends.", c.toggleHotkey, true);
 
   // The first eight plus any picked; the rest behind "More" so the card stays small.
   const shown = S.languages.filter(([code], i) => showAllLangs || i < 8 || c.languages.includes(code));
@@ -421,7 +449,6 @@ $("autostart").onchange = e => send({ type: "autostart", on: e.target.checked })
 $("quietLevel").oninput = debounce(e => save({ quietLevel: +e.target.value / 100 }), 150);
 $("mic-select").onchange = e => save({ microphone: e.target.value });
 $("vocabulary").oninput = debounce(e => save({ vocabulary: e.target.value }), 600);
-$("hotkeyCustom").onchange = e => e.target.value.trim() && save({ hotkey: e.target.value.trim().toLowerCase() });
 for (const id of ["model", "insertMode", "pasteShortcut"]) $(id).onchange = e => save({ [id]: e.target.value });
 for (const id of ["apiBase", "cleanupModel"]) $(id).onchange = e => save({ [id]: e.target.value.trim() });
 $("maxMinutes").onchange = e => save({ maxMinutes: +e.target.value });

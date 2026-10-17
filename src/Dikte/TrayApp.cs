@@ -24,7 +24,13 @@ sealed class TrayApp : ApplicationContext
 
     Settings _settings;
     HotkeyMachine _machine;
+    ToggleKey? _toggle;
     KeyboardHook? _hook;
+    MouseHook? _mouseHook;
+    KeyCapture? _capture;
+    string? _captureTarget;
+    DateTime _captureStarted;
+    readonly HashSet<int> _eatUps = new();
     History _history;
     MainWindow? _window;
 
@@ -45,11 +51,12 @@ sealed class TrayApp : ApplicationContext
         _api = new Transcriber(_http);
         _settings = LoadSettings(out var problem);
         _machine = NewMachine(_settings);
+        _toggle = NewToggle(_settings);
         _history = new History(Paths.History, _settings.HistorySize);
 
-        _idleIcon = TrayIcons.Make(Color.FromArgb(228, 228, 231), null);
-        _recordingIcon = TrayIcons.Make(Color.White, Color.FromArgb(239, 68, 68));
-        _workingIcon = TrayIcons.Make(Color.White, Color.FromArgb(59, 130, 246));
+        _idleIcon = TrayIcons.Load("idle");
+        _recordingIcon = TrayIcons.Load("listening");
+        _workingIcon = TrayIcons.Load("working");
 
         _tray = new NotifyIcon { Icon = _idleIcon, Visible = true, Text = "Dikte" };
         _tray.ContextMenuStrip = new ContextMenuStrip();
@@ -58,6 +65,7 @@ sealed class TrayApp : ApplicationContext
         BuildMenu(_tray.ContextMenuStrip);
 
         _hook = new KeyboardHook(OnKey);
+        UpdateMouseHook();
         _watch.Tick += (_, _) => OnWatch();
         _watch.Start();
         _levelTick.Tick += (_, _) => OnLevelTick();
@@ -105,11 +113,34 @@ sealed class TrayApp : ApplicationContext
         return new HotkeyMachine(HotkeySpec.Parse(s.Hotkey), lockVk);
     }
 
+    static ToggleKey? NewToggle(Settings s) =>
+        string.IsNullOrWhiteSpace(s.ToggleHotkey) ? null : new ToggleKey(HotkeySpec.Parse(s.ToggleHotkey));
+
+    /// <summary>The mouse hook sees every mouse move, so it runs only while a shortcut (or a capture) needs it.</summary>
+    void UpdateMouseHook()
+    {
+        bool needed = _capture is not null || HotkeySpec.Parse(_settings.Hotkey).UsesMouse
+            || (!string.IsNullOrWhiteSpace(_settings.ToggleHotkey) && HotkeySpec.Parse(_settings.ToggleHotkey).UsesMouse);
+        if (needed && _mouseHook is null)
+        {
+            try { _mouseHook = new MouseHook(OnKey); }
+            catch (InvalidOperationException e) { Log.Write(e.Message); }
+        }
+        else if (!needed && _mouseHook is not null)
+        {
+            _mouseHook.Dispose();
+            _mouseHook = null;
+        }
+    }
+
     void Apply(Settings fresh)
     {
         bool hotkeyChanged = fresh.Hotkey != _settings.Hotkey || fresh.HandsFreeKey != _settings.HandsFreeKey;
+        bool toggleChanged = fresh.ToggleHotkey != _settings.ToggleHotkey;
         _settings = fresh;
         if (hotkeyChanged && _recorder is null) _machine = NewMachine(fresh);
+        if (toggleChanged) _toggle = NewToggle(fresh);
+        UpdateMouseHook();
         _history = new History(Paths.History, fresh.HistorySize);
         PushState();
     }
@@ -157,6 +188,29 @@ sealed class TrayApp : ApplicationContext
 
     bool OnKey(int vk, bool isDown)
     {
+        // The release of a key or button whose press was a captured shortcut.
+        if (!isDown && _eatUps.Remove(vk)) return true;
+
+        if (_capture is not null)
+        {
+            var outcome = _capture.Feed(vk, isDown);
+            if (outcome != CaptureOutcome.Waiting)
+            {
+                if (isDown) _eatUps.Add(vk);
+                var picked = _capture.Result;
+                _ui.Post(_ => FinishCapture(outcome, picked), null);
+            }
+            return true; // nothing reaches the apps while a shortcut is being picked
+        }
+
+        if (_toggle is not null)
+        {
+            var t = _toggle.Feed(vk, isDown);
+            if (t.SuppressMenu) Native.Send(Native.Key(Native.VK_MENU_MASK, false), Native.Key(Native.VK_MENU_MASK, true));
+            if (t.Command == HotkeyCommand.Toggle) _ui.Post(_ => ToggleDictation(), null);
+            if (t.Swallow) return true;
+        }
+
         // Esc while a transcript is on its way cancels it, and must not reach the app (it would interrupt Claude Code).
         if (vk == HotkeyMachine.VkEscape && isDown && !_machine.IsRecording && _pending > 0)
         {
@@ -178,6 +232,8 @@ sealed class TrayApp : ApplicationContext
     {
         var command = _machine.Resync(Native.IsPhysicallyDown);
         if (command != HotkeyCommand.None) Run(command);
+        _toggle?.Resync(Native.IsPhysicallyDown);
+        if (_capture is not null && DateTime.Now - _captureStarted > TimeSpan.FromSeconds(12)) FinishCapture(CaptureOutcome.Cancelled, null);
 
         if (_recorder is null) return;
         var elapsed = DateTime.Now - _recordingStarted;
@@ -435,6 +491,34 @@ sealed class TrayApp : ApplicationContext
 
     static int CountWords(string text) => text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
 
+    // ---- Picking a shortcut ---------------------------------------------------------------------
+
+    void StartCapture(string target)
+    {
+        if (_recorder is not null || target is not ("hotkey" or "toggleHotkey")) return;
+        _capture = new KeyCapture();
+        _captureTarget = target;
+        _captureStarted = DateTime.Now;
+        UpdateMouseHook();
+        PushState();
+    }
+
+    void FinishCapture(CaptureOutcome outcome, string? result)
+    {
+        var target = _captureTarget;
+        _capture = null;
+        _captureTarget = null;
+        UpdateMouseHook();
+        if (outcome == CaptureOutcome.Done && target is not null && result is not null)
+        {
+            Log.Write($"Shortcut picked for {target}: {result}");
+            SaveFromWindow(JsonSerializer.SerializeToElement(new Dictionary<string, string> { [target] = result }));
+            return;
+        }
+        if (outcome == CaptureOutcome.Unusable) _window?.Post(new { type = "toast", text = "That key cannot be a shortcut. Try another." });
+        PushState();
+    }
+
     // ---- Window ---------------------------------------------------------------------------------
 
     void OpenWindow()
@@ -446,6 +530,7 @@ sealed class TrayApp : ApplicationContext
             _window.FormClosed += (_, _) =>
             {
                 StopMicTest();
+                if (_capture is not null) FinishCapture(CaptureOutcome.Cancelled, null);
                 _window = null;
             };
         }
@@ -464,6 +549,8 @@ sealed class TrayApp : ApplicationContext
             case "clearHistory": _history.Clear(); PushState(); break;
             case "autostart": Autostart.Enabled = m.GetProperty("on").GetBoolean(); PushState(); break;
             case "micTest": StartMicTest(); break;
+            case "capture": StartCapture(m.GetProperty("target").GetString() ?? ""); break;
+            case "captureCancel": FinishCapture(CaptureOutcome.Cancelled, null); break;
             case "openUrl": MainWindow.OpenUrl(m.GetProperty("url").GetString() ?? ""); break;
             case "openLog": Open(Paths.Log); break;
             case "openSettingsFile": Open(Paths.Settings); break;
@@ -518,6 +605,7 @@ sealed class TrayApp : ApplicationContext
                 history = _history.Items.Select(h => new { time = When(h.At), text = h.Text }),
                 stats,
                 autostart = Autostart.Enabled,
+                capture = _captureTarget,
             },
         });
     }
@@ -600,6 +688,8 @@ sealed class TrayApp : ApplicationContext
     {
         _hook?.Dispose();
         _hook = null;
+        _mouseHook?.Dispose();
+        _mouseHook = null;
         _showRequests.Unregister(null);
         _watch.Stop();
         _levelTick.Stop();
@@ -618,39 +708,14 @@ sealed class TrayApp : ApplicationContext
 
 static class TrayIcons
 {
-    /// <summary>A microphone glyph from Windows 11's own icon font, on an optional coloured disc.</summary>
-    public static Icon Make(Color glyph, Color? disc)
+    /// <summary>
+    /// The tray icon for a state, from a multi-size .ico drawn for each size Windows uses (16 px at 100%
+    /// up to 48 px), so it is never a big picture squeezed small.
+    /// </summary>
+    public static Icon Load(string state)
     {
-        int size = SystemInformation.SmallIconSize.Width * 2;
-        using var bmp = new Bitmap(size, size);
-        using (var g = Graphics.FromImage(bmp))
-        {
-            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
-            if (disc is { } d)
-            {
-                using var brush = new SolidBrush(d);
-                g.FillEllipse(brush, 0, 0, size - 1, size - 1);
-            }
-            using var font = IconFont(size * 0.62f);
-            using var fg = new SolidBrush(glyph);
-            using var fmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-            g.DrawString("", font, fg, new RectangleF(0, size * 0.04f, size, size), fmt);
-        }
-        var handle = bmp.GetHicon();
-        var icon = (Icon)Icon.FromHandle(handle).Clone();
-        Native.DestroyIcon(handle);
-        return icon;
-    }
-
-    static Font IconFont(float px)
-    {
-        foreach (var name in new[] { "Segoe Fluent Icons", "Segoe MDL2 Assets" })
-        {
-            var font = new Font(name, px, GraphicsUnit.Pixel);
-            if (font.Name == name) return font;
-            font.Dispose();
-        }
-        return new Font(FontFamily.GenericSansSerif, px, GraphicsUnit.Pixel);
+        using var stream = typeof(TrayIcons).Assembly.GetManifestResourceStream($"tray-{state}.ico")
+            ?? throw new InvalidOperationException($"Tray icon {state} is missing from the build.");
+        return new Icon(stream, SystemInformation.SmallIconSize);
     }
 }

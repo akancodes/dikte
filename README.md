@@ -29,11 +29,13 @@ dictations and what you have spent, and holds every setting. Closing it leaves D
 | Do this | And |
 |---|---|
 | Hold `Ctrl + Win` | Listens while you hold, pastes when you let go |
+| Tap the tap shortcut (none by default, e.g. `Mouse 5`) | Starts listening hands-free; the next tap sends |
 | Press `Space` while holding | Goes hands-free: keep talking with your hands off; `Ctrl + Win` again sends |
 | `Esc` | Cancels the recording, or the transcript still on its way |
 | Left-click the tray icon | Starts/stops hands-free dictation with the mouse |
 
-A short hold that turns into a shortcut (`Ctrl + Win + →`, `Ctrl + Win + D`...) is cancelled silently and the shortcut
+Both shortcuts are picked in Settings by pressing them: any key, key combination, or the middle and side mouse
+buttons (`Mouse 4` / `Mouse 5`, which then stop doing "back" and "forward"). A short hold that turns into a shortcut (`Ctrl + Win + →`, `Ctrl + Win + D`...) is cancelled silently and the shortcut
 works as usual. Mixing languages is fine: pick the ones you speak in Settings and the model is told to write each word
 in the language it was spoken, never translating (measured: it keeps "refactor" English in a Turkish sentence).
 
@@ -47,7 +49,8 @@ by hand (changes apply at once).
 
 | Key | Default | |
 |---|---|---|
-| `hotkey` | `ctrl+win` | Any combination: `rctrl`, `f8`, `ctrl+shift+space`, `ralt+f12`... |
+| `hotkey` | `ctrl+win` | Hold to talk. Any combination: `rctrl`, `f8`, `mouse4`, `ctrl+shift+space`... |
+| `toggleHotkey` | `""` | Tap to start hands-free, tap again to send; `mouse5`, `f9`... |
 | `handsFreeKey` | `space` | Pressed while holding the hotkey |
 | `model` | `gpt-transcribe` | Also `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1` |
 | `languages` | `[]` | Codes of the languages you speak: none = detect, one = pinned, several = mixed freely |
@@ -90,7 +93,8 @@ dotnet publish src/Dikte -c Release -o dist   # dist/Dikte.exe, self-contained, 
 `src/Dikte/Core` is plain .NET (no Windows APIs) and is what the tests cover; the rest is the Windows shell around it:
 a low-level keyboard hook, `waveIn` recording at 16 kHz mono through NAudio, per-app volume through WASAPI,
 `SendInput` for pasting, a WinForms overlay that never takes focus, and the window: one HTML page (`src/Dikte/ui`)
-in WebView2, which Windows 11 already has. Releases are built by GitHub Actions on a `v*` tag.
+in WebView2, which Windows 11 already has. The icons are drawn by `tools/make-icon.py` (standard library only), one bitmap per size Windows asks for.
+Releases are built by GitHub Actions on a `v*` tag.
 
 ## License
 

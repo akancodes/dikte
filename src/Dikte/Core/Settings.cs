@@ -8,6 +8,9 @@ public sealed class Settings
     /// <summary>Hold to talk. Examples: "ctrl+win", "rctrl", "f8", "ctrl+shift+space".</summary>
     public string Hotkey { get; set; } = "ctrl+win";
 
+    /// <summary>Tap once to start listening hands-free, tap again to send. Empty: not used. Example: "mouse5".</summary>
+    public string ToggleHotkey { get; set; } = "";
+
     /// <summary>Pressed while holding the hotkey: keeps listening hands-free until the hotkey is pressed again.</summary>
     public string HandsFreeKey { get; set; } = "space";
 
@@ -91,6 +94,12 @@ public sealed class Settings
     public void Validate()
     {
         HotkeySpec.Parse(Hotkey);
+        if (!string.IsNullOrWhiteSpace(ToggleHotkey))
+        {
+            HotkeySpec.Parse(ToggleHotkey);
+            if (string.Equals(ToggleHotkey.Replace(" ", ""), Hotkey.Replace(" ", ""), StringComparison.OrdinalIgnoreCase))
+                throw new FormatException("The tap shortcut must differ from the hold shortcut.");
+        }
         if (!KeyNames.TryParse(HandsFreeKey, out _)) throw new FormatException($"Unknown handsFreeKey \"{HandsFreeKey}\".");
         if (InsertMode is not ("paste" or "type")) throw new FormatException("insertMode must be \"paste\" or \"type\".");
         if (PasteShortcut is not ("ctrl+v" or "ctrl+shift+v" or "shift+insert"))

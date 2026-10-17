@@ -1,6 +1,6 @@
 namespace Dikte.Core;
 
-public enum HotkeyCommand { None, Start, Lock, StopAndSend, Cancel }
+public enum HotkeyCommand { None, Start, Lock, StopAndSend, Cancel, Toggle }
 
 public readonly record struct HotkeyResult(HotkeyCommand Command, bool Swallow, bool SuppressMenu)
 {

@@ -69,18 +69,46 @@ public sealed class HotkeySpec
 
     public IEnumerable<int> AllKeys => _slots.SelectMany(s => s).Distinct();
 
+    public bool UsesMouse => AllKeys.Any(KeyNames.IsMouse);
+
     public override string ToString() => Text;
 }
 
 public static class KeyNames
 {
+    /// <summary>Mouse buttons are virtual keys too, which lets GetAsyncKeyState check them like any key.</summary>
+    public const int VkMButton = 0x04, VkXButton1 = 0x05, VkXButton2 = 0x06;
+
     static readonly Dictionary<string, int> Named = new(StringComparer.OrdinalIgnoreCase)
     {
         ["space"] = 0x20, ["esc"] = 0x1B, ["escape"] = 0x1B, ["tab"] = 0x09, ["enter"] = 0x0D,
         ["capslock"] = 0x14, ["pause"] = 0x13, ["scrolllock"] = 0x91, ["insert"] = 0x2D,
         ["home"] = 0x24, ["end"] = 0x23, ["pageup"] = 0x21, ["pagedown"] = 0x22,
         ["apps"] = 0x5D, ["menu"] = 0x5D,
+        ["mouse3"] = VkMButton, ["middle"] = VkMButton, ["mouse4"] = VkXButton1, ["mouse5"] = VkXButton2,
     };
+
+    /// <summary>Canonical names, for writing a captured key back into settings.</summary>
+    static readonly Dictionary<int, string> Names = new()
+    {
+        [0x20] = "space", [0x09] = "tab", [0x0D] = "enter", [0x14] = "capslock", [0x13] = "pause", [0x91] = "scrolllock",
+        [0x2D] = "insert", [0x24] = "home", [0x23] = "end", [0x21] = "pageup", [0x22] = "pagedown", [0x5D] = "apps",
+        [VkMButton] = "mouse3", [VkXButton1] = "mouse4", [VkXButton2] = "mouse5",
+        [HotkeySpec.VkLControl] = "lctrl", [HotkeySpec.VkRControl] = "rctrl", [HotkeySpec.VkControl] = "ctrl",
+        [HotkeySpec.VkLMenu] = "lalt", [HotkeySpec.VkRMenu] = "ralt", [HotkeySpec.VkMenu] = "alt",
+        [HotkeySpec.VkLShift] = "lshift", [HotkeySpec.VkRShift] = "rshift", [HotkeySpec.VkShift] = "shift",
+        [HotkeySpec.VkLWin] = "lwin", [HotkeySpec.VkRWin] = "rwin",
+    };
+
+    public static bool IsMouse(int vk) => vk is VkMButton or VkXButton1 or VkXButton2;
+
+    public static string? Name(int vk)
+    {
+        if (Names.TryGetValue(vk, out var name)) return name;
+        if (vk is >= 0x70 and <= 0x87) return "f" + (vk - 0x70 + 1);
+        if (vk is >= 'A' and <= 'Z' or >= '0' and <= '9') return ((char)vk).ToString().ToLowerInvariant();
+        return null;
+    }
 
     public static bool TryParse(string name, out int vk)
     {

@@ -4,7 +4,8 @@ namespace Dikte;
 
 static partial class Native
 {
-    public const int WH_KEYBOARD_LL = 13;
+    public const int WH_KEYBOARD_LL = 13, WH_MOUSE_LL = 14;
+    public const int WM_MBUTTONDOWN = 0x0207, WM_MBUTTONUP = 0x0208, WM_XBUTTONDOWN = 0x020B, WM_XBUTTONUP = 0x020C;
     public const int WM_KEYDOWN = 0x0100, WM_KEYUP = 0x0101, WM_SYSKEYDOWN = 0x0104, WM_SYSKEYUP = 0x0105;
     public const uint LLKHF_INJECTED = 0x10;
     public const uint INPUT_KEYBOARD = 1;
@@ -22,6 +23,14 @@ static partial class Native
     public struct KBDLLHOOKSTRUCT
     {
         public uint vkCode, scanCode, flags, time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MSLLHOOKSTRUCT
+    {
+        public int x, y;
+        public uint mouseData, flags, time;
         public IntPtr dwExtraInfo;
     }
 
@@ -80,10 +89,6 @@ static partial class Native
 
     [LibraryImport("dwmapi.dll")]
     public static partial int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
-
-    [LibraryImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static partial bool DestroyIcon(IntPtr hIcon);
 
     public static bool IsPhysicallyDown(int vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
 
