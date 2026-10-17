@@ -1,0 +1,92 @@
+# XcodeGen spec: CI generates the Xcode project from this (`xcodegen generate`); it is never committed.
+#
+#   Dikte/      the app: keeps the microphone open for a session, transcribes, settings
+#   Keyboard/   the keyboard extension: asks the app to listen and types what comes back
+#   Shared/     both: the keychain group and Darwin notifications they talk through
+#
+# The app links DikteCore (settings, API client, WAV, history, stats) from the macOS package in ../mac.
+name: Dikte
+options:
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+packages:
+  DikteCore:
+    path: ../mac
+settings:
+  base:
+    # CI sets both from the Windows project's <Version> and the run number.
+    MARKETING_VERSION: "0.4.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+    CODE_SIGN_STYLE: Automatic
+targets:
+  Dikte:
+    type: application
+    platform: iOS
+    sources: [Dikte, Shared]
+    dependencies:
+      - target: DikteKeyboard
+      - package: DikteCore
+    scheme: {}
+    info:
+      path: Dikte/Info.plist
+      properties:
+        CFBundleDisplayName: Dikte
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        AppIdentifierPrefix: $(AppIdentifierPrefix)
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UIUserInterfaceStyle: Dark
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        ITSAppUsesNonExemptEncryption: false
+        NSMicrophoneUsageDescription: Dikte listens only while a dictation runs or a keyboard session is open, and sends the recording to the speech model you chose.
+        # audio: the microphone stays open in the background during a keyboard session.
+        UIBackgroundModes: [audio]
+        CFBundleURLTypes:
+          - CFBundleURLName: dev.akan.dikte.ios
+            CFBundleURLSchemes: [dikte]
+    entitlements:
+      path: Dikte/Dikte.entitlements
+      properties:
+        # The first group is shared with the keyboard; the second is the app's own (the API key).
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)dev.akan.dikte.ios.shared
+          - $(AppIdentifierPrefix)dev.akan.dikte.ios
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.akan.dikte.ios
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # XcodeGen's preset says "1,2": the upload then fails on iPad orientations.
+        TARGETED_DEVICE_FAMILY: "1"
+
+  DikteKeyboard:
+    type: app-extension
+    platform: iOS
+    sources: [Keyboard, Shared]
+    info:
+      path: Keyboard/Info.plist
+      properties:
+        CFBundleDisplayName: Dikte
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        AppIdentifierPrefix: $(AppIdentifierPrefix)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.keyboard-service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController
+          NSExtensionAttributes:
+            IsASCIICapable: false
+            PrefersRightToLeft: false
+            PrimaryLanguage: mul
+            # Needed for the shared keychain group and the haptics; the keyboard sends nothing anywhere.
+            RequestsOpenAccess: true
+    entitlements:
+      path: Keyboard/DikteKeyboard.entitlements
+      properties:
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)dev.akan.dikte.ios.shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.akan.dikte.ios.keyboard
+        TARGETED_DEVICE_FAMILY: "1"
