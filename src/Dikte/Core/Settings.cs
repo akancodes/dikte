@@ -61,6 +61,9 @@ public sealed class Settings
 
     public int HistorySize { get; set; } = 20;
 
+    /// <summary>Installs new releases from GitHub on its own, while nothing is being dictated.</summary>
+    public bool AutoUpdate { get; set; } = true;
+
     public static readonly JsonSerializerOptions Json = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,

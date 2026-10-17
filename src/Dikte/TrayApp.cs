@@ -21,6 +21,8 @@ sealed class TrayApp : ApplicationContext
     readonly FileSystemWatcher _settingsWatcher;
     readonly Stats _stats = new(Paths.Stats);
     readonly RegisteredWaitHandle _showRequests;
+    readonly Updater _updater = new();
+    readonly System.Windows.Forms.Timer _updateTimer = new() { Interval = 4 * 60 * 60 * 1000 };
 
     Settings _settings;
     HotkeyMachine _machine;
@@ -44,8 +46,12 @@ sealed class TrayApp : ApplicationContext
     byte[]? _failedAudio;
     string? _errorMessage, _errorHint;
     DateTime _lastReload;
+    DateTime _lastUse = DateTime.Now;
+    string? _staged;
+    bool _updating;
+    string _updateStatus = "";
 
-    public TrayApp(bool openWindow, EventWaitHandle showSignal)
+    public TrayApp(bool openWindow, EventWaitHandle showSignal, string? updatedFrom)
     {
         _ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         _api = new Transcriber(_http);
@@ -83,6 +89,12 @@ sealed class TrayApp : ApplicationContext
 
         Log.Write($"Started {Application.ProductVersion}, hotkey {_settings.Hotkey}, model {_settings.Model}");
         if (problem is not null) _overlay.ShowMessage("Settings file has a problem", problem, 8);
+        else if (updatedFrom is not null) _overlay.ShowMessage($"Dikte updated to {Updater.CurrentText}", $"From {updatedFrom}", 3);
+
+        _ = Updater.CleanUpAsync();
+        _updateTimer.Tick += (_, _) => _ = CheckForUpdatesAsync(manual: false);
+        _updateTimer.Start();
+        _ = Task.Delay(TimeSpan.FromSeconds(45)).ContinueWith(_ => _ui.Post(_ => _ = CheckForUpdatesAsync(manual: false), null), TaskScheduler.Default);
 
         // Rewrites the sign-in entry with this exe's path and flags (it may have moved or come from an older version).
         if (Autostart.Enabled) Autostart.Enabled = true;
@@ -137,7 +149,9 @@ sealed class TrayApp : ApplicationContext
     {
         bool hotkeyChanged = fresh.Hotkey != _settings.Hotkey || fresh.HandsFreeKey != _settings.HandsFreeKey;
         bool toggleChanged = fresh.ToggleHotkey != _settings.ToggleHotkey;
+        bool updatesTurnedOn = fresh.AutoUpdate && !_settings.AutoUpdate;
         _settings = fresh;
+        if (updatesTurnedOn) _ = CheckForUpdatesAsync(manual: false);
         if (hotkeyChanged && _recorder is null) _machine = NewMachine(fresh);
         if (toggleChanged) _toggle = NewToggle(fresh);
         UpdateMouseHook();
@@ -234,6 +248,8 @@ sealed class TrayApp : ApplicationContext
         if (command != HotkeyCommand.None) Run(command);
         _toggle?.Resync(Native.IsPhysicallyDown);
         if (_capture is not null && DateTime.Now - _captureStarted > TimeSpan.FromSeconds(12)) FinishCapture(CaptureOutcome.Cancelled, null);
+        if (_recorder is not null || _pending > 0 || _capture is not null || _micTest is not null) _lastUse = DateTime.Now;
+        else if (_staged is not null && DateTime.Now - _lastUse > TimeSpan.FromMinutes(1) && _window?.ContainsFocus != true) InstallUpdate();
 
         if (_recorder is null) return;
         var elapsed = DateTime.Now - _recordingStarted;
@@ -554,6 +570,7 @@ sealed class TrayApp : ApplicationContext
             case "openUrl": MainWindow.OpenUrl(m.GetProperty("url").GetString() ?? ""); break;
             case "openLog": Open(Paths.Log); break;
             case "openSettingsFile": Open(Paths.Settings); break;
+            case "checkUpdates": _ = CheckForUpdatesAsync(manual: true); break;
         }
     }
 
@@ -606,6 +623,7 @@ sealed class TrayApp : ApplicationContext
                 stats,
                 autostart = Autostart.Enabled,
                 capture = _captureTarget,
+                update = new { version = Updater.CurrentText, status = _updateStatus, busy = _updating },
             },
         });
     }
@@ -653,6 +671,60 @@ sealed class TrayApp : ApplicationContext
         _ = test.StopAsync().ContinueWith(_ => test.Dispose(), TaskScheduler.Default);
     }
 
+    // ---- Updates --------------------------------------------------------------------------------
+
+    /// <summary>Finds and downloads a newer release; OnWatch installs it once Dikte has been idle a minute.</summary>
+    async Task CheckForUpdatesAsync(bool manual)
+    {
+        if (_updating || _staged is not null || (!manual && !_settings.AutoUpdate)) return;
+        _updating = true;
+        _updateStatus = "Checking…";
+        PushState();
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(15));
+            var release = await _updater.CheckAsync(cts.Token);
+            if (release is null)
+            {
+                _updateStatus = "Up to date";
+                if (manual) _window?.Post(new { type = "toast", text = "Dikte is up to date" });
+                return;
+            }
+            var version = release.Version.ToString(3);
+            _updateStatus = $"Downloading {version}…";
+            PushState();
+            _staged = await _updater.DownloadAsync(release, cts.Token);
+            _updateStatus = $"{version} installs when you stop dictating";
+            Log.Write($"Update {version} downloaded and verified.");
+        }
+        catch (Exception e) when (e is HttpRequestException or IOException or UnauthorizedAccessException
+                                      or InvalidDataException or OperationCanceledException or System.Text.Json.JsonException)
+        {
+            _updateStatus = e is UnauthorizedAccessException ? "Cannot update: move Dikte.exe to a folder you can write to" : "Could not check for updates";
+            Log.Write($"Update check failed: {e.Message}");
+            if (manual) _window?.Post(new { type = "toast", text = _updateStatus });
+        }
+        finally
+        {
+            _updating = false;
+            PushState();
+        }
+    }
+
+    void InstallUpdate()
+    {
+        var staged = _staged;
+        if (staged is null || _recorder is not null || _pending > 0) return;
+        _staged = null;
+        if (Updater.InstallAndRestart(staged, openWindow: _window is { Visible: true }))
+        {
+            ExitThread();
+            return;
+        }
+        _updateStatus = "The update could not be installed";
+        PushState();
+    }
+
     // ---- Menu -----------------------------------------------------------------------------------
 
     void BuildMenu(ContextMenuStrip menu)
@@ -664,6 +736,11 @@ sealed class TrayApp : ApplicationContext
         menu.Items.Add(_recorder is null ? "Start hands-free dictation" : "Stop and send", null, (_, _) => ToggleDictation());
         if (_failedAudio is not null) menu.Items.Add("Retry last recording", null, (_, _) => RetryFailed());
         menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(_staged is not null ? "Restart to update" : "Check for updates", null, (_, _) =>
+        {
+            if (_staged is not null) InstallUpdate();
+            else _ = CheckForUpdatesAsync(manual: true);
+        });
         menu.Items.Add("Quit", null, (_, _) => ExitThread());
     }
 
@@ -693,6 +770,7 @@ sealed class TrayApp : ApplicationContext
         _showRequests.Unregister(null);
         _watch.Stop();
         _levelTick.Stop();
+        _updateTimer.Stop();
         _settingsWatcher.Dispose();
         _recorder?.Dispose();
         StopMicTest();
@@ -702,6 +780,7 @@ sealed class TrayApp : ApplicationContext
         _tray.Dispose();
         _overlay.Dispose();
         _http.Dispose();
+        _updater.Dispose();
         base.ExitThreadCore();
     }
 }

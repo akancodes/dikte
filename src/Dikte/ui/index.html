@@ -251,6 +251,9 @@ details .adv label { font-size: 12.5px; color: var(--muted); display: grid; gap:
         <h3>App</h3>
         <div class="row"><label id="autostartLabel">Start with Windows<small>Waits in the notification area</small></label>
           <span class="toggle"><input type="checkbox" id="autostart"><span></span></span></div>
+        <div class="row" id="updateRow"><label>Auto update<small id="updateInfo"></small></label>
+          <span class="inline"><button class="btn quiet" id="checkUpdates">Check now</button>
+          <span class="toggle"><input type="checkbox" id="autoUpdate"><span></span></span></span></div>
         <div class="row"><label>OpenAI key<small id="keyInfo"></small></label><button class="btn" id="changeKey">Change</button></div>
         <div id="keyBox" style="display:none;padding-top:6px">
           <div class="inline"><input class="field" id="keyInput" type="password" placeholder="sk-…"><button class="btn" id="keySave">Save</button></div>
@@ -458,6 +461,13 @@ function renderSettings() {
 
   for (const id of ["quietOtherAudio", "sounds", "cleanup", "appendSpace"]) $(id).checked = c[id];
   $("autostart").checked = S.autostart;
+  // Windows only for now: the Mac app sends no update state.
+  $("updateRow").style.display = S.update ? "" : "none";
+  if (S.update) {
+    $("autoUpdate").checked = c.autoUpdate;
+    $("updateInfo").textContent = `Version ${S.update.version}` + (S.update.status ? ` · ${S.update.status}` : "");
+    $("checkUpdates").disabled = S.update.busy;
+  }
   if (mac()) {
     $("autostartLabel").innerHTML = "Open at login<small>Waits in the menu bar</small>";
     $("pasteShortcutBox").style.display = "none";
@@ -476,6 +486,8 @@ function save(patch) { send({ type: "save", settings: patch }); }
 const debounce = (f, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => f(...a), ms); }; };
 for (const id of ["quietOtherAudio", "sounds", "cleanup", "appendSpace"]) $(id).onchange = e => save({ [id]: e.target.checked });
 $("autostart").onchange = e => send({ type: "autostart", on: e.target.checked });
+$("autoUpdate").onchange = e => save({ autoUpdate: e.target.checked });
+$("checkUpdates").onclick = () => send({ type: "checkUpdates" });
 $("quietLevel").oninput = debounce(e => save({ quietLevel: +e.target.value / 100 }), 150);
 $("mic-select").onchange = e => save({ microphone: e.target.value });
 $("vocabulary").oninput = debounce(e => save({ vocabulary: e.target.value }), 600);
