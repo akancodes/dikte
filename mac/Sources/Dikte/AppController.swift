@@ -515,7 +515,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func onWindowMessage(_ m: [String: Any]) {
-        switch m["type"] as? String {
+        switch m["type"] as? String ?? "" {
         case "ready": pushState()
         case "save": if let patch = m["settings"] as? [String: Any] { saveFromWindow(patch) }
         case "setKey": Task { await setKey(m["key"] as? String ?? "") }

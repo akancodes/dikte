@@ -333,8 +333,9 @@ function render() {
   $("hero").className = "hero " + (S.hasKey ? st : "idle");
   const pill = { idle: ["Ready", "var(--green)"], listening: ["Listening", "var(--red)"], handsfree: ["Hands-free", "var(--orange)"],
     working: ["Transcribing", "var(--blue)"], error: ["Needs a look", "var(--amber)"] }[S.hasKey ? st : "error"];
-  $("pill").querySelector("span").textContent = S.hasKey ? pill[0] : "Not connected";
-  $("pill").querySelector("i").style.background = pill[1];
+  const blocked = mac() && !S.permissions.accessibility;
+  $("pill").querySelector("span").textContent = blocked ? "Needs permission" : S.hasKey ? pill[0] : "Not connected";
+  $("pill").querySelector("i").style.background = blocked ? "var(--amber)" : pill[1];
   renderHero();
   renderBelow();
   renderSettings();
