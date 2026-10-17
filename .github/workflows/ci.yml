@@ -33,9 +33,30 @@ jobs:
           name: Dikte-mac
           path: dist/Dikte-mac.zip
 
+  # A merge to main that raises <Version> in the csproj is a release: the apps update themselves from it.
+  # (A v* tag pushed by hand still works.) Tags made here with GITHUB_TOKEN start no second run.
+  version:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      new: ${{ steps.v.outputs.new }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then tag="$GITHUB_REF_NAME"
+          else tag="v$(sed -n 's|.*<Version>\(.*\)</Version>.*|\1|p' src/Dikte/Dikte.csproj)"; fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then new=false; else new=true; fi
+          echo "new=$new" >> "$GITHUB_OUTPUT"
+          echo "$tag: new release = $new"
+
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, mac]
+    if: needs.version.outputs.new == 'true'
+    needs: [version, windows, mac]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -47,6 +68,7 @@ jobs:
       - name: Release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/Dikte.exe dist/Dikte-mac.zip \
-            --repo "$GITHUB_REPOSITORY" --title "Dikte ${GITHUB_REF_NAME#v}" --generate-notes
+          gh release create "$TAG" dist/Dikte.exe dist/Dikte-mac.zip \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Dikte ${TAG#v}" --generate-notes
