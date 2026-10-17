@@ -118,11 +118,14 @@ public sealed class HotkeyMachine
     /// Drops keys the hook thinks are down but physically are not. Key-ups get lost
     /// when the session locks (Win+L) or a UAC prompt takes the desktop mid-hold.
     /// Returns StopAndSend when that ends a hold.
+    /// A key the hook swallowed is kept: swallowed input never reaches the system's key
+    /// state, so GetAsyncKeyState says a held Mouse 4 is up, and dropping it would end the
+    /// hold early and let its release reach the app underneath (the browser goes back).
     /// </summary>
     public HotkeyCommand Resync(Func<int, bool> isPhysicallyDown)
     {
         bool wasCombo = _spec.IsDown(_down);
-        _down.RemoveWhere(vk => !isPhysicallyDown(vk));
+        _down.RemoveWhere(vk => !_swallowed.Contains(vk) && !isPhysicallyDown(vk));
         _swallowed.RemoveWhere(vk => !_down.Contains(vk));
         if (_state == State.Holding && wasCombo && !_spec.IsDown(_down))
         {

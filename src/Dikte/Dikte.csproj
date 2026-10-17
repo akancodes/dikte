@@ -11,7 +11,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <RootNamespace>Dikte</RootNamespace>
     <AssemblyName>Dikte</AssemblyName>
-    <Version>0.4.0</Version>
+    <Version>0.4.1</Version>
     <Product>Dikte</Product>
     <Description>Hold a key, speak, and the words appear where you are typing.</Description>
     <Copyright>© 2026 Bayram Akan</Copyright>

@@ -25,9 +25,10 @@ public sealed class ToggleKey(HotkeySpec spec)
         return new HotkeyResult(HotkeyCommand.None, swallow, false);
     }
 
+    /// <summary>Swallowed keys are kept: their state cannot be read (see HotkeyMachine.Resync).</summary>
     public void Resync(Func<int, bool> isPhysicallyDown)
     {
-        _down.RemoveWhere(vk => !isPhysicallyDown(vk));
+        _down.RemoveWhere(vk => !_swallowed.Contains(vk) && !isPhysicallyDown(vk));
         _swallowed.RemoveWhere(vk => !_down.Contains(vk));
     }
 }

@@ -93,6 +93,29 @@ public class ShortcutTests
     }
 
     [Fact]
+    public void A_swallowed_mouse_hold_survives_resync()
+    {
+        // A swallowed button never reaches the system's key state: GetAsyncKeyState says it is up.
+        var m = new HotkeyMachine(HotkeySpec.Parse("mouse4"), Space);
+        m.Feed(Mouse4, true);
+        Assert.Equal(HotkeyCommand.None, m.Resync(_ => false));
+        Assert.True(m.IsRecording);
+        var up = m.Feed(Mouse4, false);
+        Assert.Equal(HotkeyCommand.StopAndSend, up.Command);
+        Assert.True(up.Swallow);                // its release must not reach the browser either
+    }
+
+    [Fact]
+    public void A_swallowed_toggle_release_stays_swallowed_after_resync()
+    {
+        var t = new ToggleKey(HotkeySpec.Parse("mouse5"));
+        t.Feed(Mouse5, true);
+        t.Resync(_ => false);
+        Assert.True(t.Feed(Mouse5, false).Swallow);
+        Assert.Equal(HotkeyCommand.Toggle, t.Feed(Mouse5, true).Command);
+    }
+
+    [Fact]
     public void Settings_refuse_the_same_shortcut_twice()
     {
         Assert.Throws<FormatException>(new Settings { Hotkey = "mouse4", ToggleHotkey = "mouse4" }.Validate);
