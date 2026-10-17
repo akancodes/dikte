@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/Dikte/Dikte.csproj" />
+  <Project Path="tests/Dikte.Tests/Dikte.Tests.csproj" />
+</Solution>
