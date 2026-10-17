@@ -10,7 +10,6 @@ struct HomeView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 18) {
-                    if d.cameFromKeyboard && d.phase == .listening { backBanner }
                     Orb()
                         .padding(.top, 8)
                     if let notice = d.notice { noticeCard(notice) }
@@ -31,25 +30,12 @@ struct HomeView: View {
                 }
             }
             .sheet(isPresented: $showSettings) { SettingsView() }
+            .fullScreenCover(isPresented: $d.cameFromKeyboard) { GoBackView().environmentObject(d) }
         }
     }
 
     private var setupDone: Bool {
         d.hasKey && d.keyboardAdded && d.keyboard?.fullAccess == true
-    }
-
-    private var backBanner: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "arrow.uturn.backward.circle.fill").font(.title)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Listening. Go back and talk.").font(.headline)
-                Text("Tap ◀ at the top left, speak, then tap Dikte's button on the keyboard.")
-                    .font(.subheadline).foregroundStyle(.white.opacity(0.8))
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(16)
-        .background(Palette.red.opacity(0.85), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
     private func noticeCard(_ text: String) -> some View {
@@ -72,13 +58,15 @@ struct HomeView: View {
             }
             .frame(width: 46, height: 46)
             VStack(alignment: .leading, spacing: 3) {
-                if d.sessionOn, let ends = d.sessionEnds {
+                if d.sessionOn {
                     Text("Keyboard is live").font(.headline)
-                    Text("Talk from any app until \(ends.formatted(date: .omitted, time: .shortened))")
+                    Text(d.sessionEnds.map { "Talk from any app until \($0.formatted(date: .omitted, time: .shortened))" }
+                         ?? "Talk from any app until you end it")
                         .font(.subheadline).foregroundStyle(.secondary)
                 } else {
                     Text("Keyboard session").font(.headline)
-                    Text("Opens the microphone for \(d.sessionMinutes) min so the keyboard can listen anywhere")
+                    Text(d.sessionMinutes == 0 ? "Opens the microphone until you end it, so the keyboard can listen anywhere"
+                         : "Opens the microphone for \(d.sessionMinutes) min so the keyboard can listen anywhere")
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
             }
@@ -259,5 +247,64 @@ struct SetupCard: View {
 
     private func openAppSettings() {
         if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+    }
+}
+
+/// Shown when the keyboard opened Dikte: the microphone is on, and the way back is the ◀ at the top left.
+struct GoBackView: View {
+    @EnvironmentObject private var d: Dictator
+    @State private var nudge = false
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Palette.background.ignoresSafeArea()
+
+            // Points at the "◀ App" breadcrumb iOS puts in the status bar.
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "arrow.up.left")
+                    .font(.system(size: 46, weight: .heavy))
+                    .foregroundStyle(Palette.violet)
+                    .offset(x: nudge ? -6 : 4, y: nudge ? -6 : 4)
+                Text("Tap here")
+                    .font(.headline)
+                    .padding(.top, 30)
+            }
+            .padding(.leading, 14)
+            .padding(.top, 2)
+
+            VStack(spacing: 22) {
+                Spacer()
+                ZStack {
+                    Circle().fill(Palette.green.opacity(0.18)).frame(width: 150, height: 150)
+                    Circle().fill(Palette.green).frame(width: 104, height: 104)
+                    Image(systemName: "mic.fill").font(.system(size: 44, weight: .bold))
+                }
+                VStack(spacing: 8) {
+                    Text("Microphone is on").font(.largeTitle.bold())
+                    Text(d.sessionEnds.map { "until \($0.formatted(date: .omitted, time: .shortened)), longer each time you talk" }
+                         ?? "until you end it here")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                VStack(spacing: 10) {
+                    Text("Now go back").font(.title2.bold())
+                    Text("Tap ◀ at the top left. Dikte starts listening as soon as its keyboard is back on screen. Tap Send when you are done.")
+                        .font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                }
+                .padding(18)
+                .frame(maxWidth: .infinity)
+                .background(Palette.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                Text("No ◀ there? Swipe right along the bottom edge to go back to the previous app.")
+                    .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                Spacer()
+                Button("Stay in Dikte") { d.cameFromKeyboard = false }
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 8)
+            }
+            .padding(.horizontal, 20)
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) { nudge = true }
+        }
     }
 }
