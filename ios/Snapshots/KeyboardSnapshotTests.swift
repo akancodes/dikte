@@ -47,8 +47,9 @@ final class KeyboardSnapshotTests: XCTestCase {
             keys.shift = shift
             keys.needsGlobe = false
             keys.returnTitle = name.contains("light") ? "send" : "return"
+            toolbar.safeAreaRegions = []
+            panel.safeAreaRegions = []
             for host in [toolbar, panel] as [UIViewController] {
-                host.safeAreaRegions = []
                 host.view.backgroundColor = .clear
                 root.addChild(host)
             }
