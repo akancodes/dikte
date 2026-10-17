@@ -14,6 +14,8 @@ targets.append(.executableTarget(name: "Dikte", dependencies: ["DikteCore"]))
 
 let package = Package(
     name: "Dikte",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS(.v13), .iOS(.v17)],
+    // The iPhone app (ios/) links the core as a library.
+    products: [.library(name: "DikteCore", targets: ["DikteCore"])],
     targets: targets
 )

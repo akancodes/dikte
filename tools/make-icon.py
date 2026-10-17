@@ -5,6 +5,7 @@ the tray icons for each state, and a preview sheet.
     python3 tools/make-icon.py <design> <out-dir>          # dikte.ico, tray-idle/listening/working.ico, icon.png
     python3 tools/make-icon.py --sheet <out.png>           # every design side by side, with tray previews
     python3 tools/make-icon.py --icns <design> <out.icns>  # the macOS app icon, on Apple's 1024 grid
+    python3 tools/make-icon.py --ios <design> <out.png>    # the iPhone icon: 1024 px, full bleed, no alpha
 
 Shapes are signed-distance functions sampled 4x4 per pixel, so small sizes stay crisp.
 """
@@ -84,9 +85,9 @@ DESIGNS = {
     },
 }
 
-def shade(design, state, x, y, small):
+def shade(design, state, x, y, small, bleed=False):
     d = DESIGNS[design]
-    if not squircle(x, y):
+    if not bleed and not squircle(x, y):
         return None
     top, bottom = STATES.get(state, d["idle"])
     tile = lerp(top, bottom, max(0.0, min(1.0, (x + y) / 2)))
@@ -198,6 +199,37 @@ def icns(design, out):
     with open(out, "wb") as f:
         f.write(b"icns" + struct.pack(">I", 8 + len(body)) + body)
 
+# ---------- iOS ----------
+
+def render_ios(design, size=1024):
+    """The idle tile filling the whole square: iOS cuts the corners itself and refuses an alpha channel.
+    The glyph keeps the size it has on the macOS grid's tile, so the two icons read as one."""
+    scale = 1 / 0.94
+    n = 2
+    px = []
+    for j in range(size):
+        row = []
+        for i in range(size):
+            acc = [0.0, 0.0, 0.0]
+            for a in range(n):
+                for b in range(n):
+                    x = 0.5 + ((i + (a + 0.5) / n) / size - 0.5) / scale
+                    y = 0.5 + ((j + (b + 0.5) / n) / size - 0.5) / scale
+                    c = shade(design, "idle", x, y, False, bleed=True)
+                    for k in range(3):
+                        acc[k] += c[k]
+            row.append(tuple(int(acc[k] / (n * n)) for k in range(3)))
+        px.append(row)
+    return px
+
+def png_rgb(px):
+    h, w = len(px), len(px[0])
+    raw = b"".join(b"\x00" + bytes(v for p in row for v in p) for row in px)
+    def chunk(t, d):
+        return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
+
 # ---------- preview sheet ----------
 
 def sheet(out):
@@ -234,5 +266,8 @@ if __name__ == "__main__":
         sheet(sys.argv[2])
     elif sys.argv[1] == "--icns":
         icns(sys.argv[2], sys.argv[3])
+    elif sys.argv[1] == "--ios":
+        with open(sys.argv[3], "wb") as f:
+            f.write(png_rgb(render_ios(sys.argv[2])))
     else:
         build(sys.argv[1], sys.argv[2])

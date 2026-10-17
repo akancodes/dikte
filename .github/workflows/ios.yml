@@ -1,0 +1,130 @@
+name: iOS
+
+# The iPhone app (ios/). A pull request registers its App IDs and compiles it for the simulator, unsigned; a
+# merge to main (or a manual run) archives it with Xcode's cloud-managed signing through the App Store Connect
+# API key and uploads it to TestFlight for the internal group only. It is never submitted for review.
+
+on:
+  pull_request:
+    paths: ["ios/**", "!ios/**/*.md", "mac/Sources/DikteCore/**", "mac/Package.swift", ".github/workflows/ios.yml"]
+  push:
+    branches: [main]
+    paths: ["ios/**", "!ios/**/*.md", "mac/Sources/DikteCore/**", "mac/Package.swift"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: ios
+    env:
+      UPLOAD: ${{ github.event_name != 'pull_request' }}
+      # Empty on a fork's pull request, which gets no secrets.
+      HAS_KEY: ${{ secrets.ASC_KEY_ID != '' }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+    steps:
+      - uses: actions/checkout@v5
+
+      # App Store Connect only takes builds made with the iOS 26 SDK or later.
+      - name: Pick Xcode 26
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XC" ]; then ls -d /Applications/Xcode*.app; echo "No Xcode 26 on this runner"; exit 1; fi
+          sudo xcode-select -s "$XC"
+
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+          xcodebuild -version
+          echo "VERSION=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' ../src/Dikte/Dikte.csproj)" >> "$GITHUB_ENV"
+
+      - name: App Store Connect key
+        if: env.HAS_KEY == 'true'
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+          echo "AUTH=-allowProvisioningUpdates -authenticationKeyPath $RUNNER_TEMP/AuthKey.p8 -authenticationKeyID $ASC_KEY_ID -authenticationKeyIssuerID $ASC_ISSUER_ID" >> "$GITHUB_ENV"
+
+      - name: Register the App IDs
+        if: env.HAS_KEY == 'true'
+        run: node scripts/asc.mjs bundle-ids "$RUNNER_TEMP/AuthKey.p8"
+
+      - name: Compile for the simulator (unsigned)
+        if: env.UPLOAD != 'true'
+        run: >
+          xcodebuild build -quiet
+          -project Dikte.xcodeproj -scheme Dikte
+          -destination 'generic/platform=iOS Simulator'
+          CODE_SIGNING_ALLOWED=NO
+
+      - name: Check App Store Connect has the app
+        if: env.UPLOAD == 'true'
+        run: node scripts/asc.mjs app "$RUNNER_TEMP/AuthKey.p8"
+
+      # Every fresh runner makes a new Apple Development certificate, and the team's cap is shared with
+      # AkanPanel. Only the ones earlier runs made ("Created via API") go.
+      - name: Revoke development certificates left by earlier runs
+        if: env.UPLOAD == 'true'
+        run: node scripts/asc.mjs revoke-dev-certs "$RUNNER_TEMP/AuthKey.p8"
+
+      # Cloud signing can create a profile mid-build that Xcode 26 then looks for before it is written
+      # ("Build input file cannot be found: ...mobileprovision"); one more try gets past it.
+      - name: Archive
+        if: env.UPLOAD == 'true'
+        run: |
+          mkdir -p "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+          archive() {
+            xcodebuild archive -quiet \
+              -project Dikte.xcodeproj -scheme Dikte \
+              -destination 'generic/platform=iOS' \
+              -archivePath "$RUNNER_TEMP/Dikte.xcarchive" \
+              DEVELOPMENT_TEAM=${{ secrets.APPLE_TEAM_ID }} \
+              MARKETING_VERSION=$VERSION \
+              CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+              $AUTH
+          }
+          archive || { echo "::warning::Archive failed once; trying again with the profiles now on disk"; archive; }
+
+      - name: Upload to TestFlight
+        if: env.UPLOAD == 'true'
+        run: |
+          cat > "$RUNNER_TEMP/export.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>${{ secrets.APPLE_TEAM_ID }}</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+            <key>testFlightInternalTestingOnly</key><true/>
+          </dict></plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/Dikte.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/export.plist" \
+            -exportPath "$RUNNER_TEMP/export" \
+            $AUTH
+
+      - name: Internal testers
+        if: env.UPLOAD == 'true'
+        continue-on-error: true
+        env:
+          TESTERS: Bayram
+        run: node scripts/asc.mjs testers "$RUNNER_TEMP/AuthKey.p8"
+
+      - name: Forget the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/AuthKey.p8"
