@@ -48,6 +48,7 @@ struct LiveState: Codable, Equatable {
     }
 
     var phase: Phase = .off
+    /// nil while a session runs means it runs until it is ended in the app.
     var sessionEnds: Date?
     /// The last thing that went wrong, for the keyboard to show once.
     var message: String?
@@ -66,6 +67,14 @@ struct Dictation: Codable, Equatable {
 struct KeyboardSeen: Codable, Equatable {
     var at = Date()
     var fullAccess: Bool
+}
+
+/// The keyboard's settings, made in the app.
+struct KeyboardPrefs: Codable, Equatable {
+    /// "tr" (Turkish Q) or "en".
+    var layout = "tr"
+    /// How long the microphone stays open after the last dictation; 0 until it is ended in the app.
+    var sessionMinutes = 60
 }
 
 /// Small Codable values in the shared keychain group.

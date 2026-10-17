@@ -53,9 +53,20 @@ final class Dictator: ObservableObject {
     @Published var cameFromKeyboard = false
 
     @Published private(set) var settings: Settings
-    /// How long the microphone stays open after the last dictation.
-    @Published var sessionMinutes = UserDefaults.standard.object(forKey: "sessionMinutes") as? Int ?? 15 {
-        didSet { UserDefaults.standard.set(sessionMinutes, forKey: "sessionMinutes") }
+    /// How long the microphone stays open after the last dictation; 0 keeps it open until it is ended here.
+    @Published var sessionMinutes = UserDefaults.standard.object(forKey: "sessionMinutes") as? Int ?? 60 {
+        didSet {
+            UserDefaults.standard.set(sessionMinutes, forKey: "sessionMinutes")
+            if sessionOn { extend(); publish() }
+            writeKeyboardPrefs()
+        }
+    }
+    /// The keyboard's letters: "tr" (Turkish Q, which has every English letter too) or "en".
+    @Published var keyboardLayout = UserDefaults.standard.string(forKey: "keyboardLayout") ?? "tr" {
+        didSet {
+            UserDefaults.standard.set(keyboardLayout, forKey: "keyboardLayout")
+            writeKeyboardPrefs()
+        }
     }
 
     private let mic = Microphone()
@@ -95,6 +106,11 @@ final class Dictator: ObservableObject {
             Task { @MainActor in self?.endSession(because: "iOS restarted its audio. Open Dikte to start again.") }
         }
         publish()
+        writeKeyboardPrefs()
+    }
+
+    private func writeKeyboardPrefs() {
+        SharedStore.write(KeyboardPrefs(layout: keyboardLayout, sessionMinutes: sessionMinutes), "keyboardPrefs")
     }
 
     // MARK: the session
@@ -136,7 +152,7 @@ final class Dictator: ObservableObject {
     }
 
     private func extend() {
-        sessionEnds = Date().addingTimeInterval(TimeInterval(sessionMinutes * 60))
+        sessionEnds = sessionMinutes == 0 ? nil : Date().addingTimeInterval(TimeInterval(sessionMinutes * 60))
     }
 
     private func routeChanged() {
@@ -169,10 +185,11 @@ final class Dictator: ObservableObject {
 
     // MARK: one dictation
 
-    /// Opened through dikte://listen: the keyboard had no session to ask, so start one and listen at once.
+    /// Opened through dikte://listen: the keyboard had no session to ask. Open the microphone and send him back;
+    /// the keyboard starts listening itself once it is on screen again, so nothing is recorded on the way.
     func openedFromKeyboard() async {
         cameFromKeyboard = true
-        if await startSession() { start(from: .keyboard) }
+        if !(await startSession()) { cameFromKeyboard = false }
     }
 
     func start(from source: Source) {

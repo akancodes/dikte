@@ -70,6 +70,27 @@ jobs:
           -destination 'generic/platform=iOS Simulator'
           CODE_SIGNING_ALLOWED=NO
 
+      # Nothing here runs iOS, so the keyboard is drawn in the simulator and the pictures kept with the run.
+      - name: Keyboard snapshots
+        if: env.UPLOAD != 'true'
+        run: |
+          SIM=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          d = json.load(sys.stdin)["devices"]
+          ios = sorted((k for k in d if "iOS" in k), key=lambda k: [int(x) for x in k.split("iOS-")[1].split("-")])
+          phones = [x for x in d[ios[-1]] if x["name"].startswith("iPhone") and "Pro Max" not in x["name"] and "Plus" not in x["name"]]
+          print(phones[-1]["udid"])')
+          TEST_RUNNER_SNAPSHOT_DIR="$RUNNER_TEMP/snapshots" xcodebuild test -quiet \
+            -project Dikte.xcodeproj -scheme KeyboardSnapshots \
+            -destination "id=$SIM" CODE_SIGNING_ALLOWED=NO
+          ls "$RUNNER_TEMP/snapshots"
+
+      - uses: actions/upload-artifact@v4
+        if: env.UPLOAD != 'true'
+        with:
+          name: keyboard-snapshots
+          path: ${{ runner.temp }}/snapshots
+
       - name: Check App Store Connect has the app
         if: env.UPLOAD == 'true'
         run: node scripts/asc.mjs app "$RUNNER_TEMP/AuthKey.p8"

@@ -7,13 +7,17 @@ Not published: it is built for our own phones and goes only to TestFlight's inte
 
 iOS never gives a keyboard the microphone, so the work is split, the way other dictation keyboards do it:
 
-- **The app** opens a *keyboard session*: the microphone stays open in the background (the orange dot shows) for
-  15 minutes after the last dictation (5/15/30/60 in Settings). Music keeps playing; the iPhone's own microphone
-  listens even with AirPods in, so they stay in their good playback mode.
-- **The keyboard** has one big button: tap to start and tap to send, or hold to talk and let go to send. It asks the
-  app to listen, and types the text when it comes back. **Last** types the previous dictation again.
-- With no session running, the keyboard's button opens the app, which starts one and listens at once; tap ◀ at the
-  top left to go back, talk, and tap the button.
+- **The keyboard** is a full keyboard to use instead of the system one, so a dictation can be fixed on the spot:
+  Turkish Q (every English letter too) or English, shift and caps lock, 123 and #+=, delete that speeds up to whole
+  words, sentence capitals, two spaces for ". ", and the space bar dragged sideways moves the cursor. Suggestions
+  come from iOS's own Turkish and English dictionaries; nothing is corrected by itself, since a mixed sentence
+  would be "fixed" wrongly. The strip above the keys holds **Talk**: tap to start and tap to send, or hold and let go.
+- **The app** keeps the microphone open (a *keyboard session*) in the background, for 60 minutes after the last
+  dictation by default (15/30/60/120, or until ended). Music keeps playing; the iPhone's own microphone listens even
+  with AirPods in, so they stay in their good playback mode.
+- With no session running, **Talk** explains what is about to happen and offers **Open Dikte**. The app turns the
+  microphone on and shows where to go back (◀ at the top left); the keyboard starts listening by itself once it is
+  back on screen, so nothing is recorded on the way.
 - The two meet in a shared keychain group (the state and the newest transcript) and Darwin notifications (the
   nudges), so no App Group has to be registered by hand. The OpenAI key sits in the app's private keychain group,
   where the keyboard cannot read it. The keyboard needs **Allow Full Access** for the shared group; it sends nothing

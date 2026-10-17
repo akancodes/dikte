@@ -39,13 +39,18 @@ struct SettingsView: View {
                     Toggle("Add a space after the text", isOn: binding(\.appendSpace))
                 }
                 Section {
+                    Picker("Letters", selection: $d.keyboardLayout) {
+                        Text("Türkçe Q").tag("tr")
+                        Text("English").tag("en")
+                    }
                     Picker("Microphone stays open", selection: $d.sessionMinutes) {
-                        ForEach([5, 15, 30, 60], id: \.self) { Text("\($0) min").tag($0) }
+                        ForEach([15, 30, 60, 120], id: \.self) { Text("\($0) min").tag($0) }
+                        Text("Until I end it").tag(0)
                     }
                 } header: {
-                    Text("Keyboard session")
+                    Text("Keyboard")
                 } footer: {
-                    Text("After the last dictation. While it is open iOS shows the orange microphone dot; music keeps playing.")
+                    Text("Türkçe Q has every English letter too. The microphone stays open for this long after the last dictation, so the keyboard can listen without opening Dikte; iOS shows the orange dot meanwhile and music keeps playing. Longer costs a little more battery.")
                 }
                 Section {
                     TextField("API address", text: binding(\.apiBase))
