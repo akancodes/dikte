@@ -31,8 +31,9 @@ ve sonucu öndeki pencereye yapıştırır. `gpt-transcribe` ile bir saatlik kon
 4. Bir metin alanına tıkla, **`Fn`'yi (🌐) basılı tut**, konuş, bırak. 🌐 tuşu emoji açıyor ya da klavye dilini
    değiştiriyorsa **Sistem Ayarları → Klavye → 🌐 tuşuna basınca → Hiçbir Şey Yapma** yap; Dikte'nin penceresi de söyler.
 
-Güncellemeden sonra macOS imzasız uygulamanın Erişilebilirlik iznini unutur: Dikte'yi listeden **−** ile kaldırıp
-yeniden aç.
+Dikte iki sistemde de kendini günceller: 4 saatte bir GitHub'da yeni sürüm var mı bakar, indirdiğinin SHA-256'sını
+doğrular ve bir dakika dikte etmediğinde kurar (Ayarlar'daki **Auto update** bunu kapatır). Mac'te her güncellemeden
+sonra macOS imzasız uygulamanın Erişilebilirlik iznini unutur: Dikte'yi listeden **−** ile kaldırıp yeniden aç.
 
 | Ne yaparsan | Ne olur |
 |---|---|

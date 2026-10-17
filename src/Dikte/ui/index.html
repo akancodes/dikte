@@ -461,7 +461,7 @@ function renderSettings() {
 
   for (const id of ["quietOtherAudio", "sounds", "cleanup", "appendSpace"]) $(id).checked = c[id];
   $("autostart").checked = S.autostart;
-  // Windows only for now: the Mac app sends no update state.
+  // Hidden only for an app that sends no update state.
   $("updateRow").style.display = S.update ? "" : "none";
   if (S.update) {
     $("autoUpdate").checked = c.autoUpdate;

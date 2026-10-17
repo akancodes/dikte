@@ -35,6 +35,8 @@ public struct Settings: Codable, Equatable {
     public var quietLevel = 0.15
     public var maxMinutes = 10
     public var historySize = 20
+    /// Installs new releases from GitHub on its own, while nothing is being dictated.
+    public var autoUpdate = true
 
     public init() {}
 
@@ -63,6 +65,7 @@ public struct Settings: Codable, Equatable {
         quietLevel = try value(.quietLevel, d.quietLevel)
         maxMinutes = try value(.maxMinutes, d.maxMinutes)
         historySize = try value(.historySize, d.historySize)
+        autoUpdate = try value(.autoUpdate, d.autoUpdate)
     }
 
     /// Reads the file, or writes the defaults when it does not exist yet. Comments and trailing commas are fine.
