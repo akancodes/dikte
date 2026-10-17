@@ -4,6 +4,7 @@ the tray icons for each state, and a preview sheet.
 
     python3 tools/make-icon.py <design> <out-dir>          # dikte.ico, tray-idle/listening/working.ico, icon.png
     python3 tools/make-icon.py --sheet <out.png>           # every design side by side, with tray previews
+    python3 tools/make-icon.py --icns <design> <out.icns>  # the macOS app icon, on Apple's 1024 grid
 
 Shapes are signed-distance functions sampled 4x4 per pixel, so small sizes stay crisp.
 """
@@ -162,6 +163,41 @@ def build(design, out):
     with open(f"{out}/icon.png", "wb") as f:
         f.write(png(render(design, "idle", 256)))
 
+# ---------- macOS ----------
+
+def render_mac(design, size):
+    """The idle tile on Apple's icon grid: the rounded square spans 824 of 1024 px, centred."""
+    scale = (824 / 1024) / 0.94          # shade()'s squircle is 0.94 of its square
+    n = 2 if size >= 512 else 4
+    small = size <= 24
+    px = []
+    for j in range(size):
+        row = []
+        for i in range(size):
+            acc = [0.0, 0.0, 0.0]
+            cover = 0
+            for a in range(n):
+                for b in range(n):
+                    x = 0.5 + ((i + (a + 0.5) / n) / size - 0.5) / scale
+                    y = 0.5 + ((j + (b + 0.5) / n) / size - 0.5) / scale
+                    c = shade(design, "idle", x, y, small)
+                    if c:
+                        cover += 1
+                        for k in range(3):
+                            acc[k] += c[k]
+            row.append(tuple(int(acc[k] / cover) for k in range(3)) + (int(255 * cover / (n * n)),) if cover else (0, 0, 0, 0))
+        px.append(row)
+    return px
+
+ICNS_TYPES = [(b"icp4", 16), (b"icp5", 32), (b"icp6", 64), (b"ic07", 128), (b"ic08", 256), (b"ic09", 512),
+              (b"ic10", 1024), (b"ic11", 32), (b"ic12", 64), (b"ic13", 256), (b"ic14", 512)]
+
+def icns(design, out):
+    pngs = {size: png(render_mac(design, size)) for size in sorted({s for _, s in ICNS_TYPES})}
+    body = b"".join(kind + struct.pack(">I", 8 + len(pngs[size])) + pngs[size] for kind, size in ICNS_TYPES)
+    with open(out, "wb") as f:
+        f.write(b"icns" + struct.pack(">I", 8 + len(body)) + body)
+
 # ---------- preview sheet ----------
 
 def sheet(out):
@@ -196,5 +232,7 @@ def sheet(out):
 if __name__ == "__main__":
     if sys.argv[1] == "--sheet":
         sheet(sys.argv[2])
+    elif sys.argv[1] == "--icns":
+        icns(sys.argv[2], sys.argv[3])
     else:
         build(sys.argv[1], sys.argv[2])
