@@ -2,18 +2,18 @@ import XCTest
 @testable import DikteCore
 
 final class UpdatesTests: XCTestCase {
-    let hash = "4df85caed0a5f5fc66fd3b6e3ca7a7a5d692c3802fcf30c70e306f2253cc52a9"
+    let zipHash = "4df85caed0a5f5fc66fd3b6e3ca7a7a5d692c3802fcf30c70e306f2253cc52a9"
     let installed = AppVersion("0.4.1")!
 
     /// The shape of GitHub's /releases/latest answer, cut down to what is read.
     func json(tag: String = "v0.5.0", digest: String? = nil, prerelease: Bool = false,
               url: String = "https://github.com/akancodes/dikte/releases/download/v0.5.0/Dikte-mac.zip") -> Data {
-        let digestField = digest == "" ? "" : "\"digest\": \"\(digest ?? "sha256:" + hash)\","
+        let digestField = digest == "" ? "" : "\"digest\": \"\(digest ?? "sha256:" + zipHash)\","
         return Data("""
         {
           "tag_name": "\(tag)", "draft": false, "prerelease": \(prerelease),
           "assets": [
-            { "name": "Dikte.exe", "size": 52333225, "digest": "sha256:\(hash)",
+            { "name": "Dikte.exe", "size": 52333225, "digest": "sha256:\(zipHash)",
               "browser_download_url": "https://github.com/akancodes/dikte/releases/download/v0.5.0/Dikte.exe" },
             { "name": "Dikte-mac.zip", "size": 562582, \(digestField)
               "browser_download_url": "\(url)" }
@@ -31,7 +31,7 @@ final class UpdatesTests: XCTestCase {
         XCTAssertEqual(r.version, AppVersion("0.5.0"))
         XCTAssertEqual(r.version.description, "0.5.0")
         XCTAssertEqual(r.size, 562582)
-        XCTAssertEqual(r.sha256, hash)
+        XCTAssertEqual(r.sha256, zipHash)
         XCTAssertEqual(r.url.lastPathComponent, "Dikte-mac.zip")
     }
 
@@ -47,13 +47,13 @@ final class UpdatesTests: XCTestCase {
     }
 
     func testAZipWithoutAProperDigestIsNeverOffered() throws {
-        for digest in ["", "sha1:abc", "sha256:nothex", "sha256:" + String(hash.dropLast())] {
+        for digest in ["", "sha1:abc", "sha256:nothex", "sha256:" + String(zipHash.dropLast())] {
             XCTAssertNil(try newer(json(digest: digest)), digest)
         }
     }
 
     func testAnUpperCaseDigestIsReadAsLowerCase() throws {
-        XCTAssertEqual(try newer(json(digest: "sha256:" + hash.uppercased()))?.sha256, hash)
+        XCTAssertEqual(try newer(json(digest: "sha256:" + zipHash.uppercased()))?.sha256, zipHash)
     }
 
     func testOnlyGithubDownloadsAreTaken() throws {
