@@ -47,7 +47,7 @@ final class KeysView: UIView {
     var addressKeys: [String] = [] { didSet { if oldValue != addressKeys { rebuild() } } }
 
     private var rows: [[Key]] = []
-    private var caps: [UIView] = []
+    private var caps: [KeyCap] = []
     private var globeButton: UIButton?
     private var touchKeys: [UITouch: (row: Int, index: Int)] = [:]
     private var popup: UILabel?
