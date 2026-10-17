@@ -61,6 +61,8 @@ final class KeysView: UIView {
 
     private let margin: CGFloat = 3
     private let rowGap: CGFloat = 11
+    /// Room between the strip above and the first row.
+    private let topInset: CGFloat = 6
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -194,7 +196,7 @@ final class KeysView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         let width = bounds.width
-        let rowHeight = (bounds.height - rowGap * CGFloat(rows.count - 1)) / CGFloat(rows.count)
+        let rowHeight = (bounds.height - topInset - rowGap * CGFloat(rows.count - 1)) / CGFloat(rows.count)
         // The widest letter row fixes the unit, so every letter key has the same width.
         let widest = CGFloat(rows[0].count)
         let gap: CGFloat = widest >= 12 ? 5 : 6
@@ -207,7 +209,7 @@ final class KeysView: UIView {
             let flex = flexCount > 0 ? max(0, (width - 2 * margin - gaps - fixed) / flexCount) : 0
             // A row with no flexible key is centred.
             var x = flexCount > 0 ? margin : (width - fixed - gaps) / 2
-            let y = CGFloat(r) * (rowHeight + rowGap)
+            let y = topInset + CGFloat(r) * (rowHeight + rowGap)
             for k in rows[r].indices {
                 let w = rows[r][k].units.map { $0 * unit } ?? flex
                 let frame = CGRect(x: x, y: y, width: w, height: rowHeight)
@@ -223,8 +225,8 @@ final class KeysView: UIView {
     /// The key under a point: its row by height, then the nearest key in that row, so gaps never swallow a tap.
     private func keyIndex(at point: CGPoint) -> (row: Int, index: Int)? {
         guard !rows.isEmpty else { return nil }
-        let rowHeight = bounds.height / CGFloat(rows.count)
-        let r = min(rows.count - 1, max(0, Int(point.y / rowHeight)))
+        let rowHeight = (bounds.height - topInset) / CGFloat(rows.count)
+        let r = min(rows.count - 1, max(0, Int((point.y - topInset) / rowHeight)))
         var best: (Int, CGFloat)?
         for (k, key) in rows[r].enumerated() where key.kind != .spacer {
             let d = point.x < key.frame.minX ? key.frame.minX - point.x : point.x > key.frame.maxX ? point.x - key.frame.maxX : 0

@@ -151,7 +151,7 @@ struct PanelView: View {
 
     private var listening: some View {
         ZStack {
-            LinearGradient(colors: [Tone.red, Tone.red.opacity(0.82)], startPoint: .top, endPoint: .bottom)
+            LinearGradient(colors: [Tone.red, Color(red: 0.80, green: 0.16, blue: 0.29)], startPoint: .top, endPoint: .bottom)
             VStack(spacing: 14) {
                 TimelineView(.animation) { context in
                     let t = context.date.timeIntervalSinceReferenceDate

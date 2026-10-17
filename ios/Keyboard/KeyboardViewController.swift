@@ -35,6 +35,8 @@ final class KeyboardViewController: UIInputViewController {
         let toolbar = UIHostingController(rootView: ToolbarView(model: model))
         let panel = UIHostingController(rootView: PanelView(model: model))
         for host in [toolbar, panel] as [UIViewController] {
+            // No safe-area padding: it pushed the strip's content down onto the keys.
+            host.safeAreaRegions = []
             host.view.backgroundColor = .clear
             host.view.translatesAutoresizingMaskIntoConstraints = false
             addChild(host)
