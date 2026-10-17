@@ -77,8 +77,6 @@ final class KeyboardModel: ObservableObject {
     @Published private(set) var lastText: String?
 
     weak var controller: KeyboardViewController?
-    private var appAlive = false
-    private var pingAt = Date.distantPast
     private var pressedAt = Date.distantPast
     private var startedByPress = false
     private var waitTask: Task<Void, Never>?
@@ -89,7 +87,6 @@ final class KeyboardModel: ObservableObject {
     static func listen() {
         guard !listening else { return }
         listening = true
-        SignalCenter.shared.on(.pong) { KeyboardModel.current?.appAlive = true }
         SignalCenter.shared.on(.changed) { KeyboardModel.current?.refresh() }
     }
 
@@ -98,18 +95,11 @@ final class KeyboardModel: ObservableObject {
         self.needsGlobe = needsGlobe
         SharedStore.write(KeyboardSeen(fullAccess: fullAccess), "keyboard")
         lastText = SharedStore.read(Dictation.self, "dictation")?.text
-        ping()
         refresh()
     }
 
     func disappeared() {
         waitTask?.cancel()
-    }
-
-    private func ping() {
-        appAlive = false
-        pingAt = Date()
-        Bridge.post(.ping)
     }
 
     // MARK: the button

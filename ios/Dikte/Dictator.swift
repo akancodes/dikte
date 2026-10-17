@@ -81,10 +81,6 @@ final class Dictator: ObservableObject {
         signals.on(.start) { [weak self] in self?.start(from: .keyboard) }
         signals.on(.stop) { [weak self] in self?.stop() }
         signals.on(.cancel) { [weak self] in self?.cancel() }
-        signals.on(.ping) { [weak self] in
-            guard let self, self.phase != .off else { return }
-            Bridge.post(.pong)
-        }
 
         let center = NotificationCenter.default
         center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in

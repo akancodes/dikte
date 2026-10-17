@@ -22,9 +22,9 @@ enum Bridge {
 
     enum Signal: String, CaseIterable {
         // keyboard → app
-        case start, stop, cancel, ping
+        case start, stop, cancel
         // app → keyboard
-        case pong, changed
+        case changed
 
         var name: String { Bridge.prefix + "." + rawValue }
     }
