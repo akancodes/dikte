@@ -7,8 +7,8 @@
 //   revoke-dev-certs  revokes the development certificates earlier runs made ("Created via API"): every fresh
 //                     runner makes one, and the team's cap on them is shared with AkanPanel's builds
 //   testers           puts the newest builds in front of the internal group "Us" (made if missing) and the
-//                     team members named in TESTERS (first names, comma-separated). Internal testing needs no
-//                     review and nothing is published.
+//                     team members named in TESTERS (first names, comma-separated; "Omer" matches "Ömer").
+//                     Internal testing needs no review and nothing is published.
 import { createPrivateKey, sign } from "node:crypto";
 import { readFileSync } from "node:fs";
 
@@ -98,14 +98,15 @@ const commands = {
       ).json.data;
       console.log(`Made the internal group "Us" (${group.id})`);
     }
-    const wanted = (process.env.TESTERS ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+    const plain = (s) => (s ?? "").normalize("NFD").replace(/\p{M}/gu, "").trim().toLowerCase();
+    const wanted = (process.env.TESTERS ?? "").split(",").map(plain).filter(Boolean);
     const users = (await api("/v1/users?limit=100")).json.data;
     const present = new Set(
       (await api(`/v1/betaGroups/${group.id}/betaTesters?limit=200`)).json.data.map((t) => t.attributes.email?.toLowerCase()),
     );
     for (const user of users) {
       const a = user.attributes;
-      if (!wanted.includes((a.firstName ?? "").toLowerCase())) continue;
+      if (!wanted.includes(plain(a.firstName))) continue;
       const email = a.username;
       if (present.has(email?.toLowerCase())) {
         console.log(`${a.firstName}: already in "Us"`);
