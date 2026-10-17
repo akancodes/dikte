@@ -108,8 +108,10 @@ const commands = {
       const a = user.attributes;
       if (!wanted.includes(plain(a.firstName))) continue;
       const email = a.username;
+      // The repository is public, and so are its run logs: only a hint of the address.
+      const who = `${a.firstName} ${a.lastName ?? ""} <${email?.[0]}…@${email?.split("@")[1]}> ${(a.roles ?? []).join("/")}`;
       if (present.has(email?.toLowerCase())) {
-        console.log(`${a.firstName}: already in "Us"`);
+        console.log(`${who}: already in "Us"`);
         continue;
       }
       const r = await api("/v1/betaTesters", {
@@ -123,7 +125,7 @@ const commands = {
           },
         },
       });
-      console.log(`${a.firstName}: ${r.status < 300 ? "added to \"Us\"" : `not added (${r.status}) ${JSON.stringify(r.json).slice(0, 300)}`}`);
+      console.log(`${who}: ${r.status < 300 ? "added to \"Us\"" : `not added (${r.status}) ${JSON.stringify(r.json).slice(0, 300)}`}`);
     }
   },
 };
