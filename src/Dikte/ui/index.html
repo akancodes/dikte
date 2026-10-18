@@ -226,21 +226,21 @@ details .adv label { font-size: 12.5px; color: var(--muted); display: grid; gap:
       <div class="card">
         <h3>While you talk</h3>
         <div class="row"><label>Turn other sounds down<small>Music and videos go quiet, then come back</small></label>
-          <span class="toggle"><input type="checkbox" id="quietOtherAudio"><span></span></span></div>
+          <label class="toggle"><input type="checkbox" id="quietOtherAudio"><span></span></label></div>
         <div id="quietBox" style="padding-top:6px">
           <input type="range" id="quietLevel" min="0" max="50" step="5">
           <div class="slider-labels"><span>Mute</span><span id="quietValue"></span><span>50%</span></div>
         </div>
         <div class="row"><label>Sounds<small>A soft blip when it starts and stops</small></label>
-          <span class="toggle"><input type="checkbox" id="sounds"><span></span></span></div>
+          <label class="toggle"><input type="checkbox" id="sounds"><span></span></label></div>
       </div>
 
       <div class="card">
         <h3>Text</h3>
         <div class="row"><label>Tidy up<small>Drops "um"s, applies "no wait" corrections · about 1 s more</small></label>
-          <span class="toggle"><input type="checkbox" id="cleanup"><span></span></span></div>
+          <label class="toggle"><input type="checkbox" id="cleanup"><span></span></label></div>
         <div class="row"><label>Space after each dictation</label>
-          <span class="toggle"><input type="checkbox" id="appendSpace"><span></span></span></div>
+          <label class="toggle"><input type="checkbox" id="appendSpace"><span></span></label></div>
         <div style="padding-top:8px">
           <label class="sub" style="display:block;margin:0 0 6px">Words to spell your way</label>
           <textarea class="field" id="vocabulary" placeholder="Claude Code, Kubernetes, your project names…"></textarea>
@@ -250,10 +250,10 @@ details .adv label { font-size: 12.5px; color: var(--muted); display: grid; gap:
       <div class="card">
         <h3>App</h3>
         <div class="row"><label id="autostartLabel">Start with Windows<small>Waits in the notification area</small></label>
-          <span class="toggle"><input type="checkbox" id="autostart"><span></span></span></div>
+          <label class="toggle"><input type="checkbox" id="autostart"><span></span></label></div>
         <div class="row" id="updateRow"><label>Auto update<small id="updateInfo"></small></label>
           <span class="inline"><button class="btn quiet" id="checkUpdates">Check now</button>
-          <span class="toggle"><input type="checkbox" id="autoUpdate"><span></span></span></span></div>
+          <label class="toggle"><input type="checkbox" id="autoUpdate"><span></span></label></span></div>
         <div class="row"><label>OpenAI key<small id="keyInfo"></small></label><button class="btn" id="changeKey">Change</button></div>
         <div id="keyBox" style="display:none;padding-top:6px">
           <div class="inline"><input class="field" id="keyInput" type="password" placeholder="sk-…"><button class="btn" id="keySave">Save</button></div>
