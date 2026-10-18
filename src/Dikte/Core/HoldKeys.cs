@@ -3,18 +3,24 @@ namespace Dikte.Core;
 /// <summary>What a recording is for: plain dictation, dictation written in another language, or an edit of the selection.</summary>
 public enum DictationMode { Dictate, Translate, Edit }
 
+/// <summary>What a hold shortcut records for: a kind, and for a mode's own shortcut that mode's id.</summary>
+public readonly record struct HoldTarget(DictationMode Kind, string? ModeId = null)
+{
+    public static implicit operator HoldTarget(DictationMode kind) => new(kind);
+}
+
 /// <summary>
-/// Several hold-to-talk shortcuts, one per mode, each with its own <see cref="HotkeyMachine"/>. Only one
+/// Several hold-to-talk shortcuts, one per target, each with its own <see cref="HotkeyMachine"/>. Only one
 /// records at a time: when two complete on the same key, the one with more keys wins (ctrl+mouse4 over
 /// mouse4), and a shortcut pressed while another is recording does not start a second recording.
 /// </summary>
 public sealed class HoldKeys
 {
-    readonly List<(DictationMode Mode, HotkeySpec Spec, HotkeyMachine Machine)> _keys = new();
+    readonly List<(HoldTarget Target, HotkeySpec Spec, HotkeyMachine Machine)> _keys = new();
 
-    public HoldKeys(IEnumerable<(DictationMode Mode, HotkeySpec Spec)> keys, int lockVk)
+    public HoldKeys(IEnumerable<(HoldTarget Target, HotkeySpec Spec)> keys, int lockVk)
     {
-        foreach (var (mode, spec) in keys) _keys.Add((mode, spec, new HotkeyMachine(spec, lockVk)));
+        foreach (var (target, spec) in keys) _keys.Add((target, spec, new HotkeyMachine(spec, lockVk)));
         if (_keys.Count == 0) throw new ArgumentException("At least one hold shortcut is needed.", nameof(keys));
     }
 
@@ -40,12 +46,12 @@ public sealed class HoldKeys
             }
         }
 
-        var commands = new List<(HotkeyCommand, DictationMode)>();
+        var commands = new List<(HotkeyCommand, HoldTarget)>();
         // Endings first, so a Cancel of one shortcut lands before the Start of the one that replaced it.
         for (int i = 0; i < _keys.Count; i++)
-            if (results[i].Command is not (HotkeyCommand.None or HotkeyCommand.Start)) commands.Add((results[i].Command, _keys[i].Mode));
+            if (results[i].Command is not (HotkeyCommand.None or HotkeyCommand.Start)) commands.Add((results[i].Command, _keys[i].Target));
         for (int i = 0; i < _keys.Count; i++)
-            if (results[i].Command == HotkeyCommand.Start) commands.Add((HotkeyCommand.Start, _keys[i].Mode));
+            if (results[i].Command == HotkeyCommand.Start) commands.Add((HotkeyCommand.Start, _keys[i].Target));
         return new HoldResult(commands, swallow, suppressMenu);
     }
 
@@ -67,4 +73,4 @@ public sealed class HoldKeys
     }
 }
 
-public sealed record HoldResult(IReadOnlyList<(HotkeyCommand Command, DictationMode Mode)> Commands, bool Swallow, bool SuppressMenu);
+public sealed record HoldResult(IReadOnlyList<(HotkeyCommand Command, HoldTarget Target)> Commands, bool Swallow, bool SuppressMenu);

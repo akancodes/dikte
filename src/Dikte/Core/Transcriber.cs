@@ -58,6 +58,16 @@ public sealed class Transcriber(HttpClient http)
         return cleaned.Length == 0 || cleaned.Length > text.Length * 1.5 + 40 ? text : cleaned;
     }
 
+    /// <summary>The transcript written the way a mode says.</summary>
+    public async Task<string> RewriteAsync(string text, Mode mode, Settings s, string apiKey, CancellationToken ct)
+    {
+        var model = mode.Model.Length > 0 ? mode.Model : s.CleanupModel;
+        var rewritten = await ChatAsync(Modes.SystemPrompt, $"<mode>\n{mode.Instruction}\n</mode>\n<transcript>\n{text}\n</transcript>", s, apiKey, ct, model);
+        rewritten = rewritten.Replace("<transcript>", "").Replace("</transcript>", "").Trim();
+        // Far longer than what was said: it answered instead of rewriting. The words as spoken are safer.
+        return rewritten.Length == 0 || rewritten.Length > text.Length * 2.5 + 200 ? text : rewritten;
+    }
+
     /// <summary>Dictation written in <see cref="Settings.TranslateTo"/>.</summary>
     public async Task<string> TranslateAsync(string text, Settings s, string apiKey, CancellationToken ct)
     {
@@ -74,11 +84,11 @@ public sealed class Transcriber(HttpClient http)
         return edited.Replace("<selection>", "").Replace("</selection>", "").Trim('\n', '\r');
     }
 
-    async Task<string> ChatAsync(string system, string user, Settings s, string apiKey, CancellationToken ct)
+    async Task<string> ChatAsync(string system, string user, Settings s, string apiKey, CancellationToken ct, string? model = null)
     {
         var body = new JsonObject
         {
-            ["model"] = s.CleanupModel,
+            ["model"] = model ?? s.CleanupModel,
             ["messages"] = new JsonArray(
                 new JsonObject { ["role"] = "system", ["content"] = system },
                 new JsonObject { ["role"] = "user", ["content"] = user }),

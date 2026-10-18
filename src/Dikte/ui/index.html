@@ -169,6 +169,33 @@ details .adv { display: grid; grid-template-columns: repeat(auto-fill, minmax(24
 details .adv label { font-size: 12.5px; color: var(--muted); display: grid; gap: 4px; }
 .key { font-family: "Cascadia Mono", Consolas, ui-monospace, Menlo, monospace; background: var(--soft); padding: 2px 8px; border-radius: 6px; }
 
+/* ---------- modes ---------- */
+.modebar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 16px; padding: 12px 14px; border-radius: 16px;
+  background: var(--panel); box-shadow: var(--shadow); }
+.modebar > b { font-weight: 650; margin-right: 4px; }
+.modebar .chip.on, .mode-list .chip.on { background: var(--violet); color: #fff; }
+.modebar small { color: var(--muted); font-size: 12.5px; margin-left: auto; }
+.modes-wrap { display: grid; grid-template-columns: minmax(200px, 260px) 1fr; gap: 22px; }
+.mode-list { display: grid; gap: 6px; align-content: start; }
+.mode-item { display: flex; align-items: center; gap: 8px; text-align: left; border: 1px solid var(--line); background: var(--bg);
+  border-radius: 12px; padding: 10px 12px; font-weight: 600; }
+.mode-item small { margin-left: auto; color: var(--muted); font-weight: 500; font-size: 12px; }
+.mode-item.sel { border-color: var(--violet); box-shadow: 0 0 0 1px var(--violet) inset; }
+.mode-item .dot { width: 8px; height: 8px; border-radius: 50%; background: transparent; flex: none; }
+.mode-item.active .dot { background: var(--violet); }
+.mode-edit { display: grid; gap: 14px; align-content: start; min-width: 0; }
+.mode-edit label.f { display: grid; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.mode-edit textarea.field { min-height: 120px; font-size: 14px; line-height: 1.5; color: var(--text); }
+.mode-edit .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.apps { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.app { display: inline-flex; align-items: center; gap: 6px; padding: 5px 6px 5px 11px; border-radius: 99px; background: var(--chip); font-size: 13px; font-weight: 550; }
+.app button { border: 0; background: none; color: var(--muted); padding: 0 4px; font-size: 15px; line-height: 1; }
+.app button:hover { color: var(--red); }
+.apps select.field, .apps input.field { width: auto; min-width: 150px; padding: 6px 10px; }
+.mode-actions { display: flex; gap: 8px; justify-content: space-between; align-items: center; }
+.btn.danger { color: var(--red); }
+@media (max-width: 860px) { .modes-wrap, .mode-edit .two { grid-template-columns: 1fr; } }
+
 .notice { display: flex; align-items: center; gap: 14px; margin-top: 14px; padding: 14px 18px; border-radius: 16px;
   background: var(--panel); box-shadow: var(--shadow); border-left: 4px solid var(--amber); }
 .notice div { flex: 1; } .notice b { display: block; font-weight: 600; } .notice small { color: var(--muted); font-size: 12.5px; }
@@ -214,6 +241,16 @@ details .adv label { font-size: 12.5px; color: var(--muted); display: grid; gap:
         <div class="bind" id="bind-toggleHotkey"></div>
       </div>
 
+      <div class="card" id="modesCard" style="grid-column:1/-1">
+        <h3>Modes</h3>
+        <p class="sub">How your words are written. Tell each mode what to do in your own words. A mode's own shortcut wins, then the app you are in, then the active mode.</p>
+        <div class="modes-wrap">
+          <div class="mode-list" id="modeList"></div>
+          <div class="mode-edit" id="modeEdit"></div>
+        </div>
+        <div class="bind" id="bind-nextModeHotkey" style="margin-top:8px;border-top:1px solid var(--line)"></div>
+      </div>
+
       <div class="card">
         <h3>Languages you speak</h3>
         <p class="sub">Pick every language you talk in; mixing them in one sentence is fine. None picked: detected on its own.</p>
@@ -241,8 +278,6 @@ details .adv label { font-size: 12.5px; color: var(--muted); display: grid; gap:
 
       <div class="card">
         <h3>Text</h3>
-        <div class="row"><label>Tidy up<small>Drops "um"s, applies "no wait" corrections · about 1 s more</small></label>
-          <label class="toggle"><input type="checkbox" id="cleanup"><span></span></label></div>
         <div class="row"><label>Space after each dictation</label>
           <label class="toggle"><input type="checkbox" id="appendSpace"><span></span></label></div>
         <div style="padding-top:8px">
@@ -294,7 +329,7 @@ details .adv label { font-size: 12.5px; color: var(--muted); display: grid; gap:
           <label id="pasteShortcutBox">Paste shortcut
             <select class="field" id="pasteShortcut"><option value="ctrl+v">Ctrl + V</option><option value="ctrl+shift+v">Ctrl + Shift + V</option><option value="shift+insert">Shift + Insert</option></select></label>
           <label>Longest recording (minutes)<input class="field" id="maxMinutes" type="number" min="1" max="12"></label>
-          <label>Tidy-up, translate and edit model<input class="field" id="cleanupModel"></label>
+          <label>Default model for modes, translate and edit<input class="field" id="cleanupModel" list="chatModels"></label>
           <label id="translateToBox">Language the translate shortcut writes<input class="field" id="translateTo"></label>
         </div>
         <div class="inline" style="margin-top:14px"><button class="btn" data-send="openLog">Open log</button><button class="btn" data-send="openSettingsFile">Open settings file</button></div>
@@ -303,6 +338,7 @@ details .adv label { font-size: 12.5px; color: var(--muted); display: grid; gap:
   </section>
 </main>
 <div class="toast" id="toast"></div>
+<datalist id="chatModels"><option value="gpt-4.1-mini"><option value="gpt-4.1"><option value="gpt-4.1-nano"></datalist>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -311,6 +347,8 @@ let S = null;                 // last state from the app
 let levels = new Array(90).fill(0);
 let lastResult = "";
 let showAllLangs = false;
+let selMode = null;           // id of the mode open in the editor
+let openApps = [];            // apps with a window, for the "used in" picker
 
 const KEY_NAMES = { ctrl: "Ctrl", win: "Win", alt: "Alt", shift: "Shift", rctrl: "Right Ctrl", lctrl: "Left Ctrl",
   ralt: "Right Alt", lalt: "Left Alt", rshift: "Right Shift", lshift: "Left Shift", rwin: "Right Win", lwin: "Left Win",
@@ -339,6 +377,7 @@ window.chrome?.webview?.addEventListener("message", e => {
   else if (m.type === "result") { lastResult = m.text; renderHero(); }
   else if (m.type === "keyResult") keyResult(m);
   else if (m.type === "toast") toast(m.text);
+  else if (m.type === "apps") { openApps = m.apps; renderModes(); }
 });
 
 function toast(text) {
@@ -413,6 +452,7 @@ function renderBelow() {
   if (mac() && S.globeHint)
     html += `<div class="notice"><div><b>Does holding Fn also open emoji or switch the keyboard language?</b><small>Set System Settings → Keyboard → “Press 🌐 key to” → Do Nothing, so it only talks.</small></div>
       <button class="btn" data-permission="keyboard">Keyboard settings</button></div>`;
+  if (S.hasKey && S.settings.modes) html += modeBar();
   if (s.totalCount > 0) {
     html += `<div class="tiles">
       <div class="tile"><b>${s.weekWords.toLocaleString()}</b><span>words this week</span></div>
@@ -431,10 +471,104 @@ function renderBelow() {
         <button class="copy" data-copy="${i}">Copy</button></div>`).join("") + `</div>`;
   }
   b.innerHTML = html;
+  b.querySelectorAll("[data-setmode]").forEach(x => x.onclick = () => send({ type: "setMode", id: x.dataset.setmode }));
   b.querySelectorAll("[data-permission]").forEach(x => x.onclick = () => send({ type: "openPermission", which: x.dataset.permission }));
   b.querySelectorAll("[data-copy]").forEach(x => x.onclick = () => { send({ type: "copy", text: S.history[+x.dataset.copy].text }); toast("Copied"); });
   b.querySelectorAll(".item .t").forEach(x => x.onclick = () => x.parentElement.classList.toggle("open"));
   $("clearHistory") && ($("clearHistory").onclick = () => send({ type: "clearHistory" }));
+}
+
+// ---------- modes ----------
+const PLAIN = "plain";
+const modeName = id => id === PLAIN ? "As spoken" : (S.settings.modes.find(m => m.id === id)?.name ?? "As spoken");
+
+function modeBar() {
+  const c = S.settings, active = c.activeMode || PLAIN;
+  const ruled = c.modes.filter(m => m.apps.length);
+  const note = ruled.map(m => `${esc(m.name)} in ${esc(m.apps.slice(0, 3).join(", "))}${m.apps.length > 3 ? "…" : ""}`).join(" · ");
+  return `<div class="modebar"><b>Mode</b>` +
+    [[PLAIN, "As spoken"], ...c.modes.map(m => [m.id, m.name])].map(([id, name]) =>
+      `<button class="chip ${id === active ? "on" : ""}" data-setmode="${esc(id)}">${esc(name)}</button>`).join("") +
+    (note ? `<small>Always: ${note}</small>` : "") + `</div>`;
+}
+
+function saveModes(modes, extra = {}) { save({ modes, ...extra }); }
+const cloneModes = () => JSON.parse(JSON.stringify(S.settings.modes));
+
+function newId(name, taken) {
+  let slug = name.toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  if (!slug || slug === PLAIN) slug = "mode";
+  let id = slug;
+  for (let n = 2; taken.includes(id); n++) id = `${slug}-${n}`;
+  return id;
+}
+
+function renderModes() {
+  const c = S.settings;
+  if (!c.modes) { $("modesCard").style.display = "none"; return; }
+  const active = c.activeMode || PLAIN;
+  if (!c.modes.some(m => m.id === selMode)) selMode = c.modes[0]?.id ?? null;
+
+  const listHtml = c.modes.map(m => `<button class="mode-item ${m.id === selMode ? "sel" : ""} ${m.id === active ? "active" : ""}" data-sel="${esc(m.id)}">
+      <i class="dot"></i>${esc(m.name)}<small>${m.id === active ? "active" : m.hotkey ? esc(pretty(m.hotkey)) : m.apps.length ? "by app" : ""}</small></button>`).join("") +
+    `<button class="btn" id="addMode" style="margin-top:4px">+ New mode</button>`;
+  if ($("modeList").dataset.html !== listHtml) {
+    $("modeList").innerHTML = listHtml; $("modeList").dataset.html = listHtml;
+    $("modeList").querySelectorAll("[data-sel]").forEach(b => b.onclick = () => { selMode = b.dataset.sel; renderModes(); });
+    $("addMode").onclick = () => {
+      const modes = cloneModes(), id = newId("New mode", modes.map(m => m.id));
+      modes.push({ id, name: "New mode", instruction: "Write it as…", model: "", apps: [], hotkey: "" });
+      selMode = id; saveModes(modes);
+    };
+  }
+
+  const m = c.modes.find(x => x.id === selMode), box = $("modeEdit");
+  if (!m) { box.innerHTML = `<p class="sub">No modes yet. Add one: it is an instruction in your own words.</p>`; box.dataset.for = ""; return; }
+  if (box.dataset.for !== m.id) {
+    box.dataset.for = m.id;
+    box.innerHTML = `
+      <div class="two">
+        <label class="f">Name<input class="field" id="mName"></label>
+        <label class="f">Model<input class="field" id="mModel" list="chatModels" placeholder="Default (${esc(c.cleanupModel)})"></label>
+      </div>
+      <label class="f">What to do with your words<textarea class="field" id="mInstr" placeholder="Write it as a short list…"></textarea></label>
+      <div class="f"><label class="f" style="margin-bottom:6px">Always used in these apps</label><div class="apps" id="mApps"></div></div>
+      <div class="bind" id="bind-mode:${esc(m.id)}" style="padding:4px 0"></div>
+      <div class="mode-actions"><button class="btn" id="mActive"></button><button class="btn quiet danger" id="mDelete">Delete mode</button></div>`;
+    const patch = change => { const modes = cloneModes(); change(modes.find(x => x.id === m.id)); saveModes(modes); };
+    $("mName").oninput = debounce(e => e.target.value.trim() && patch(x => x.name = e.target.value.trim()), 500);
+    $("mModel").onchange = e => patch(x => x.model = e.target.value.trim());
+    $("mInstr").oninput = debounce(e => e.target.value.trim() && patch(x => x.instruction = e.target.value.trim()), 700);
+    $("mDelete").onclick = () => {
+      if (!confirm(`Delete the ${m.name} mode?`)) return;
+      const modes = cloneModes().filter(x => x.id !== m.id);
+      saveModes(modes, c.activeMode === m.id ? { activeMode: PLAIN } : {});
+    };
+    if (!openApps.length) send({ type: "listApps" });
+  }
+  setIfIdle($("mName"), m.name);
+  setIfIdle($("mModel"), m.model);
+  setIfIdle($("mInstr"), m.instruction);
+  const isActive = m.id === active;
+  $("mActive").textContent = isActive ? "Active mode" : "Make it the active mode";
+  $("mActive").disabled = isActive;
+  $("mActive").onclick = () => send({ type: "setMode", id: m.id });
+
+  const patchApps = apps => { const modes = cloneModes(); modes.find(x => x.id === m.id).apps = apps; saveModes(modes); };
+  const choices = [...new Set([...openApps, ...(S.codingApps || [])])].filter(a => !m.apps.some(x => x.toLowerCase() === a.toLowerCase())).sort((a, b) => a.localeCompare(b));
+  const appsHtml = m.apps.map((a, i) => `<span class="app">${esc(a)}<button data-rm="${i}" title="Remove">×</button></span>`).join("") +
+    `<select class="field" id="mAddApp"><option value="">+ Add an app…</option>${choices.map(a => `<option>${esc(a)}</option>`).join("")}<option value="?">Type a name…</option></select>`;
+  if ($("mApps").dataset.html !== appsHtml) {
+    $("mApps").innerHTML = appsHtml; $("mApps").dataset.html = appsHtml;
+    $("mApps").querySelectorAll("[data-rm]").forEach(b => b.onclick = () => patchApps(m.apps.filter((_, i) => i !== +b.dataset.rm)));
+    $("mAddApp").onfocus = () => send({ type: "listApps" });
+    $("mAddApp").onchange = e => {
+      let v = e.target.value;
+      if (v === "?") v = (prompt(mac() ? "App name, as in the Dock (Terminal, Code, iTerm2):" : "Process name, as in Task Manager's Details tab, without .exe (WindowsTerminal, Code):") || "").trim();
+      if (v) patchApps([...m.apps, v]); else e.target.value = "";
+    };
+  }
+  renderBind("mode:" + m.id, "Hold to talk in this mode", "Whatever the active mode is.", m.hotkey, true);
 }
 
 const pretty = hk => hk.split("+").map(p => keyName(p.trim())).join(" + ");
@@ -452,13 +586,20 @@ function renderBind(target, title, help, value, optional) {
   el.innerHTML = `<div class="what"><b>${title}</b><small>${help}</small></div><div class="acts">${acts}</div><div class="caps">${caps}</div>`;
   el.querySelector("[data-capture]")?.addEventListener("click", e => { e.currentTarget.blur(); send({ type: "capture", target }); });
   el.querySelector("[data-cancel]")?.addEventListener("click", () => send({ type: "captureCancel" }));
-  el.querySelector("[data-clear]")?.addEventListener("click", () => save({ [target]: "" }));
+  el.querySelector("[data-clear]")?.addEventListener("click", () => {
+    if (!target.startsWith("mode:")) return save({ [target]: "" });
+    const modes = cloneModes(); modes.find(x => x.id === target.slice(5)).hotkey = ""; saveModes(modes);
+  });
 }
 
 function renderSettings() {
   const c = S.settings;
   renderBind("hotkey", "Hold to talk", "Listens while held, sends when let go. Space while holding: hands-free.", c.hotkey, false);
   renderBind("toggleHotkey", "Tap to start, tap to send", "One press starts listening hands-free, the next sends.", c.toggleHotkey, true);
+  if (c.modes) {
+    renderModes();
+    renderBind("nextModeHotkey", "Switch to the next mode", "Tap to change the active mode; a small note says which one is on.", c.nextModeHotkey, true);
+  }
   // Windows only for now: the Mac app has none of these settings yet.
   const tools = !mac() && "editHotkey" in c;
   $("toolsCard").style.display = tools ? "" : "none";
@@ -487,7 +628,7 @@ function renderSettings() {
   if (sel.dataset.html !== html) { sel.innerHTML = html; sel.dataset.html = html; }
   setIfIdle(sel, c.microphone);
 
-  for (const id of ["quietOtherAudio", "sounds", "cleanup", "appendSpace"]) $(id).checked = c[id];
+  for (const id of ["quietOtherAudio", "sounds", "appendSpace"]) $(id).checked = c[id];
   $("autostart").checked = S.autostart;
   // Windows only for now: the Mac app sends no update state.
   $("updateRow").style.display = S.update ? "" : "none";
@@ -513,7 +654,7 @@ function renderSettings() {
 // ---------- saving ----------
 function save(patch) { send({ type: "save", settings: patch }); }
 const debounce = (f, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => f(...a), ms); }; };
-for (const id of ["quietOtherAudio", "sounds", "cleanup", "appendSpace", "voiceCommands"]) $(id).onchange = e => save({ [id]: e.target.checked });
+for (const id of ["quietOtherAudio", "sounds", "appendSpace", "voiceCommands"]) $(id).onchange = e => save({ [id]: e.target.checked });
 $("autostart").onchange = e => send({ type: "autostart", on: e.target.checked });
 $("autoUpdate").onchange = e => save({ autoUpdate: e.target.checked });
 $("checkUpdates").onclick = () => send({ type: "checkUpdates" });

@@ -26,7 +26,7 @@ sealed class TrayApp : ApplicationContext
 
     Settings _settings;
     HoldKeys _holds;
-    ToggleKey? _toggle, _repaste;
+    ToggleKey? _toggle, _repaste, _nextMode;
     KeyboardHook? _hook;
     MouseHook? _mouseHook;
     KeyCapture? _capture;
@@ -40,6 +40,8 @@ sealed class TrayApp : ApplicationContext
     Recorder? _micTest;
     DateTime _recordingStarted;
     DictationMode _mode;
+    Mode? _writeMode;
+    Mode? _failedMode;
     string? _lastText;
     DateTime _lastTextAt;
     bool _feedbackShown;
@@ -62,6 +64,7 @@ sealed class TrayApp : ApplicationContext
         _holds = NewHolds(_settings);
         _toggle = NewTap(_settings.ToggleHotkey);
         _repaste = NewTap(_settings.RepasteHotkey);
+        _nextMode = NewTap(_settings.NextModeHotkey);
         _history = new History(Paths.History, _settings.HistorySize);
 
         _idleIcon = TrayIcons.Load("idle");
@@ -119,24 +122,33 @@ sealed class TrayApp : ApplicationContext
         {
             problem = e.Message;
             Log.Write($"Settings unusable, using defaults: {e.Message}");
-            return new Settings();
+            var defaults = new Settings();
+            defaults.Normalize();
+            return defaults;
         }
     }
 
     static HoldKeys NewHolds(Settings s)
     {
         KeyNames.TryParse(s.HandsFreeKey, out var lockVk);
-        var keys = new List<(DictationMode, HotkeySpec)> { (DictationMode.Dictate, HotkeySpec.Parse(s.Hotkey)) };
+        var keys = new List<(HoldTarget, HotkeySpec)> { (DictationMode.Dictate, HotkeySpec.Parse(s.Hotkey)) };
         if (!string.IsNullOrWhiteSpace(s.TranslateHotkey)) keys.Add((DictationMode.Translate, HotkeySpec.Parse(s.TranslateHotkey)));
         if (!string.IsNullOrWhiteSpace(s.EditHotkey)) keys.Add((DictationMode.Edit, HotkeySpec.Parse(s.EditHotkey)));
+        foreach (var m in s.Modes.Where(m => m.Hotkey.Length > 0))
+            keys.Add((new HoldTarget(DictationMode.Dictate, m.Id), HotkeySpec.Parse(m.Hotkey)));
         return new HoldKeys(keys, lockVk);
     }
+
+    /// <summary>Every hold shortcut in one string, to tell whether the set changed.</summary>
+    static string HoldShortcuts(Settings s) =>
+        string.Join("|", new[] { s.Hotkey, s.HandsFreeKey, s.TranslateHotkey, s.EditHotkey }.Concat(s.Modes.Select(m => m.Id + "=" + m.Hotkey)));
 
     static ToggleKey? NewTap(string shortcut) =>
         string.IsNullOrWhiteSpace(shortcut) ? null : new ToggleKey(HotkeySpec.Parse(shortcut));
 
     static IEnumerable<string> Shortcuts(Settings s) =>
-        new[] { s.Hotkey, s.ToggleHotkey, s.TranslateHotkey, s.EditHotkey, s.RepasteHotkey }.Where(x => !string.IsNullOrWhiteSpace(x));
+        new[] { s.Hotkey, s.ToggleHotkey, s.TranslateHotkey, s.EditHotkey, s.RepasteHotkey, s.NextModeHotkey }
+            .Concat(s.Modes.Select(m => m.Hotkey)).Where(x => !string.IsNullOrWhiteSpace(x));
 
     /// <summary>The mouse hook sees every mouse move, so it runs only while a shortcut (or a capture) needs it.</summary>
     void UpdateMouseHook()
@@ -156,16 +168,17 @@ sealed class TrayApp : ApplicationContext
 
     void Apply(Settings fresh)
     {
-        bool hotkeyChanged = fresh.Hotkey != _settings.Hotkey || fresh.HandsFreeKey != _settings.HandsFreeKey
-            || fresh.TranslateHotkey != _settings.TranslateHotkey || fresh.EditHotkey != _settings.EditHotkey;
+        bool hotkeyChanged = HoldShortcuts(fresh) != HoldShortcuts(_settings);
         bool toggleChanged = fresh.ToggleHotkey != _settings.ToggleHotkey;
         bool repasteChanged = fresh.RepasteHotkey != _settings.RepasteHotkey;
+        bool nextModeChanged = fresh.NextModeHotkey != _settings.NextModeHotkey;
         bool updatesTurnedOn = fresh.AutoUpdate && !_settings.AutoUpdate;
         _settings = fresh;
         if (updatesTurnedOn) _ = CheckForUpdatesAsync(manual: false);
         if (hotkeyChanged && _recorder is null) _holds = NewHolds(fresh);
         if (toggleChanged) _toggle = NewTap(fresh.ToggleHotkey);
         if (repasteChanged) _repaste = NewTap(fresh.RepasteHotkey);
+        if (nextModeChanged) _nextMode = NewTap(fresh.NextModeHotkey);
         UpdateMouseHook();
         _history = new History(Paths.History, fresh.HistorySize);
         PushState();
@@ -190,18 +203,19 @@ sealed class TrayApp : ApplicationContext
     }
 
     /// <summary>Merges a partial settings object from the window, checks it, saves it.</summary>
-    void SaveFromWindow(JsonElement patch)
+    void SaveFromWindow(JsonElement patch, bool quiet = false)
     {
         try
         {
             var node = JsonSerializer.SerializeToNode(_settings, Settings.Json)!.AsObject();
             foreach (var prop in patch.EnumerateObject()) node[prop.Name] = JsonNode.Parse(prop.Value.GetRawText());
             var fresh = node.Deserialize<Settings>(Settings.Json)!;
+            fresh.Normalize();
             fresh.Validate();
             _lastReload = DateTime.Now; // our own write: no "reloaded" toast
             fresh.Save(Paths.Settings);
             Apply(fresh);
-            _window?.Post(new { type = "toast", text = "Saved" });
+            if (!quiet) _window?.Post(new { type = "toast", text = "Saved" });
         }
         catch (Exception e) when (e is FormatException or JsonException or IOException or InvalidOperationException)
         {
@@ -237,6 +251,14 @@ sealed class TrayApp : ApplicationContext
             if (r.Swallow) return true;
         }
 
+        if (_nextMode is not null)
+        {
+            var n = _nextMode.Feed(vk, isDown);
+            if (n.SuppressMenu) Native.Send(Native.Key(Native.VK_MENU_MASK, false), Native.Key(Native.VK_MENU_MASK, true));
+            if (n.Command == HotkeyCommand.Toggle) _ui.Post(_ => SetActiveMode(Modes.Next(_settings), announce: true), null);
+            if (n.Swallow) return true;
+        }
+
         if (_toggle is not null)
         {
             var t = _toggle.Feed(vk, isDown);
@@ -254,8 +276,8 @@ sealed class TrayApp : ApplicationContext
 
         var result = _holds.Feed(vk, isDown);
         if (result.SuppressMenu) Native.Send(Native.Key(Native.VK_MENU_MASK, false), Native.Key(Native.VK_MENU_MASK, true));
-        foreach (var (command, mode) in result.Commands)
-            _ui.Post(_ => Run(command, mode), null); // never do slow work inside the hook
+        foreach (var (command, target) in result.Commands)
+            _ui.Post(_ => Run(command, target), null); // never do slow work inside the hook
         return result.Swallow;
     }
 
@@ -265,6 +287,7 @@ sealed class TrayApp : ApplicationContext
         if (command != HotkeyCommand.None) Run(command, _mode);
         _toggle?.Resync(Native.IsPhysicallyDown);
         _repaste?.Resync(Native.IsPhysicallyDown);
+        _nextMode?.Resync(Native.IsPhysicallyDown);
         if (_capture is not null && DateTime.Now - _captureStarted > TimeSpan.FromSeconds(12)) FinishCapture(CaptureOutcome.Cancelled, null);
         if (_recorder is not null || _pending > 0 || _capture is not null || _micTest is not null) _lastUse = DateTime.Now;
         else if (_staged is not null && DateTime.Now - _lastUse > TimeSpan.FromMinutes(1) && _window?.ContainsFocus != true) InstallUpdate();
@@ -300,7 +323,8 @@ sealed class TrayApp : ApplicationContext
                 _overlay.ShowListening(() => recorder.Level, "Say what to change", "Release to apply to the selection · Esc");
                 break;
             default:
-                _overlay.ShowListening(() => recorder.Level);
+                if (_writeMode is { } m) _overlay.ShowListening(() => recorder.Level, $"Listening · {m.Name}");
+                else _overlay.ShowListening(() => recorder.Level);
                 break;
         }
     }
@@ -310,11 +334,11 @@ sealed class TrayApp : ApplicationContext
         if (_window is { Visible: true } && _recorder is not null && _feedbackShown) _window.Post(new { type = "level", v = _recorder.Level });
     }
 
-    void Run(HotkeyCommand command, DictationMode mode)
+    void Run(HotkeyCommand command, HoldTarget target)
     {
         switch (command)
         {
-            case HotkeyCommand.Start: StartRecording(mode); break;
+            case HotkeyCommand.Start: StartRecording(target); break;
             case HotkeyCommand.Lock:
                 if (_recorder is not null)
                 {
@@ -347,13 +371,15 @@ sealed class TrayApp : ApplicationContext
 
     // ---- Recording ------------------------------------------------------------------------------
 
-    void StartRecording(DictationMode mode)
+    void StartRecording(HoldTarget target)
     {
         if (_recorder is not null) return;
         StopMicTest();
         try
         {
-            _mode = mode;
+            _mode = target.Kind;
+            // Picked now, while the app being typed into is still the one in front.
+            _writeMode = target.Kind == DictationMode.Dictate ? Modes.Resolve(_settings, target.ModeId, Native.ForegroundApp()) : null;
             _recorder = new Recorder(_settings.Microphone);
             _recorder.Start();
             _recordingStarted = DateTime.Now;
@@ -398,6 +424,7 @@ sealed class TrayApp : ApplicationContext
         _recorder = null;
         if (recorder is null) return;
         var mode = _mode;
+        var writeMode = _writeMode;
         EndRecording();
         bool wasShown = _feedbackShown;
         byte[] wav;
@@ -434,12 +461,12 @@ sealed class TrayApp : ApplicationContext
             return;
         }
         if (_settings.Sounds) Sounds.Stop();
-        await ProcessAsync(wav, length, mode);
+        await ProcessAsync(wav, length, mode, writeMode);
     }
 
     // ---- Transcribing ---------------------------------------------------------------------------
 
-    async Task ProcessAsync(byte[] wav, TimeSpan length, DictationMode mode = DictationMode.Dictate)
+    async Task ProcessAsync(byte[] wav, TimeSpan length, DictationMode mode = DictationMode.Dictate, Mode? writeMode = null)
     {
         var key = KeyStore.Get();
         if (key is null)
@@ -459,7 +486,8 @@ sealed class TrayApp : ApplicationContext
 
         _pending++;
         UpdateIcon();
-        if (_recorder is null) _overlay.ShowWorking(mode switch { DictationMode.Translate => "Translating", DictationMode.Edit => "Editing", _ => "Transcribing" });
+        if (_recorder is null)
+            _overlay.ShowWorking(mode switch { DictationMode.Translate => "Translating", DictationMode.Edit => "Editing", _ => writeMode is null ? "Transcribing" : $"Writing · {writeMode.Name}" });
         PushState();
         var clock = Stopwatch.StartNew();
         try
@@ -484,16 +512,16 @@ sealed class TrayApp : ApplicationContext
                         catch (ApiException e) { Log.Write($"Translation skipped, writing the words as spoken: {e.Message}"); }
                         break;
                     default:
-                        if (settings.Cleanup)
+                        if (writeMode is not null)
                         {
-                            try { text = await _api.CleanupAsync(text, settings, key, ct); }
-                            catch (ApiException e) { Log.Write($"Clean-up skipped: {e.Message}"); }
+                            try { text = await _api.RewriteAsync(text, writeMode, settings, key, ct); }
+                            catch (ApiException e) { Log.Write($"{writeMode.Name} skipped, writing the words as heard: {e.Message}"); }
                         }
                         break;
                 }
             }
             await previous;
-            Log.Write($"{mode} {length.TotalSeconds:0.0}s: transcribed in {transcribeMs} ms (total {clock.ElapsedMilliseconds} ms), {text.Length} chars" +
+            Log.Write($"{(writeMode is null ? mode.ToString() : $"{mode} ({writeMode.Id})")} {length.TotalSeconds:0.0}s: transcribed in {transcribeMs} ms (total {clock.ElapsedMilliseconds} ms), {text.Length} chars" +
                       (spoken.PressEnter ? ", then Enter" : "") + (spoken.DeleteLast ? ", delete last" : "") +
                       (mode == DictationMode.Edit ? $", selection {selection?.Length ?? 0} chars" : ""));
 
@@ -514,6 +542,7 @@ sealed class TrayApp : ApplicationContext
                 _stats.Record(DateTime.Now, words, length.TotalSeconds, settings.Model);
             }
             _failedAudio = null;
+            _failedMode = null;
 
             if (ownWindow)
             {
@@ -545,6 +574,7 @@ sealed class TrayApp : ApplicationContext
         catch (ApiException e)
         {
             _failedAudio = wav;
+            _failedMode = writeMode;
             try { File.WriteAllBytes(Paths.FailedAudio, wav); } catch (IOException) { }
             Log.Write($"Transcription failed: {e.Message}");
             Fail(e.Message, "The recording is kept: Retry from the tray menu");
@@ -552,6 +582,7 @@ sealed class TrayApp : ApplicationContext
         catch (Exception e)
         {
             _failedAudio = wav;
+            _failedMode = writeMode;
             Log.Write($"Unexpected failure: {e}");
             Fail("Something went wrong", e.Message);
         }
@@ -617,7 +648,9 @@ sealed class TrayApp : ApplicationContext
 
     void StartCapture(string target)
     {
-        if (_recorder is not null || target is not ("hotkey" or "toggleHotkey" or "translateHotkey" or "editHotkey" or "repasteHotkey")) return;
+        bool known = target is "hotkey" or "toggleHotkey" or "translateHotkey" or "editHotkey" or "repasteHotkey" or "nextModeHotkey"
+            || (target.StartsWith("mode:", StringComparison.Ordinal) && _settings.Modes.Any(m => m.Id == target[5..]));
+        if (_recorder is not null || !known) return;
         _capture = new KeyCapture();
         _captureTarget = target;
         _captureStarted = DateTime.Now;
@@ -634,7 +667,9 @@ sealed class TrayApp : ApplicationContext
         if (outcome == CaptureOutcome.Done && target is not null && result is not null)
         {
             Log.Write($"Shortcut picked for {target}: {result}");
-            SaveFromWindow(JsonSerializer.SerializeToElement(new Dictionary<string, string> { [target] = result }));
+            SaveFromWindow(target.StartsWith("mode:", StringComparison.Ordinal)
+                ? ModesPatch(_settings, target[5..], m => m.Hotkey = result)
+                : JsonSerializer.SerializeToElement(new Dictionary<string, string> { [target] = result }));
             return;
         }
         if (outcome == CaptureOutcome.Unusable) _window?.Post(new { type = "toast", text = "That key cannot be a shortcut. Try another." });
@@ -677,7 +712,60 @@ sealed class TrayApp : ApplicationContext
             case "openLog": Open(Paths.Log); break;
             case "openSettingsFile": Open(Paths.Settings); break;
             case "checkUpdates": _ = CheckForUpdatesAsync(manual: true); break;
+            case "setMode": SetActiveMode(m.GetProperty("id").GetString() ?? Modes.Plain, announce: false); break;
+            case "listApps": _window?.Post(new { type = "apps", apps = OpenApps() }); break;
         }
+    }
+
+    // ---- Modes ----------------------------------------------------------------------------------
+
+    /// <summary>The menu, the window and the next-mode shortcut all switch the active mode through here.</summary>
+    void SetActiveMode(string id, bool announce)
+    {
+        if (id != Modes.Plain && _settings.Modes.All(m => m.Id != id)) return;
+        if (id != _settings.ActiveMode)
+        {
+            SaveFromWindow(JsonSerializer.SerializeToElement(new { activeMode = id }, Settings.Json), quiet: true);
+            Log.Write($"Active mode: {id}");
+        }
+        if (announce && _recorder is null)
+            _overlay.ShowMessage($"Mode: {Modes.NameOf(_settings, id)}", ActiveModeHint(), 1.8);
+    }
+
+    /// <summary>Says when an app rule will still pick another mode, so a switch that seems ignored is explained.</summary>
+    string ActiveModeHint()
+    {
+        var app = Native.ForegroundApp();
+        var byApp = app is null ? null : _settings.Modes.FirstOrDefault(m => m.Apps.Any(a => Modes.Normalize(a) == Modes.Normalize(app)));
+        return byApp is null ? "" : $"{byApp.Name} is still used in {app}";
+    }
+
+    /// <summary>A save patch that changes one mode and keeps the rest of the list.</summary>
+    static JsonElement ModesPatch(Settings s, string id, Action<Mode> change)
+    {
+        var modes = JsonSerializer.Deserialize<List<Mode>>(JsonSerializer.Serialize(s.Modes, Settings.Json), Settings.Json)!;
+        var mode = modes.FirstOrDefault(m => m.Id == id);
+        if (mode is not null) change(mode);
+        return JsonSerializer.SerializeToElement(new { modes }, Settings.Json);
+    }
+
+    /// <summary>Apps with a window, by process name, for picking which ones a mode is used in.</summary>
+    static IReadOnlyList<string> OpenApps()
+    {
+        var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in Process.GetProcesses())
+        {
+            using (p)
+            {
+                try
+                {
+                    if (p.MainWindowHandle != IntPtr.Zero && p.ProcessName is not ("Dikte" or "ApplicationFrameHost" or "TextInputHost" or "SystemSettings"))
+                        names.Add(p.ProcessName);
+                }
+                catch (InvalidOperationException) { }
+            }
+        }
+        return names.ToList();
     }
 
     async Task SetKeyAsync(string key)
@@ -729,6 +817,7 @@ sealed class TrayApp : ApplicationContext
                 stats,
                 autostart = Autostart.Enabled,
                 capture = _captureTarget,
+                codingApps = Modes.CodingApps,
                 update = new { version = Updater.CurrentText, status = _updateStatus, busy = _updating },
             },
         });
@@ -840,6 +929,13 @@ sealed class TrayApp : ApplicationContext
         open.Font = new Font(open.Font, FontStyle.Bold);
         menu.Items.Add(open);
         menu.Items.Add(_recorder is null ? "Start hands-free dictation" : "Stop and send", null, (_, _) => ToggleDictation());
+        var modes = new ToolStripMenuItem($"Mode: {Modes.NameOf(_settings, _settings.ActiveMode)}");
+        foreach (var (id, name) in new[] { (Modes.Plain, Modes.NameOf(_settings, Modes.Plain)) }.Concat(_settings.Modes.Select(m => (m.Id, m.Name))))
+        {
+            var item = new ToolStripMenuItem(name, null, (_, _) => SetActiveMode(id, announce: false)) { Checked = id == _settings.ActiveMode };
+            modes.DropDownItems.Add(item);
+        }
+        menu.Items.Add(modes);
         if (_failedAudio is not null) menu.Items.Add("Retry last recording", null, (_, _) => RetryFailed());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_staged is not null ? "Restart to update" : "Check for updates", null, (_, _) =>
@@ -855,7 +951,7 @@ sealed class TrayApp : ApplicationContext
         var wav = _failedAudio;
         if (wav is null) return;
         _errorMessage = _errorHint = null;
-        _ = ProcessAsync(wav, TimeSpan.FromSeconds((wav.Length - 44) / (Recorder.SampleRate * 2.0)));
+        _ = ProcessAsync(wav, TimeSpan.FromSeconds((wav.Length - 44) / (Recorder.SampleRate * 2.0)), DictationMode.Dictate, _failedMode);
     }
 
     static void Open(string path)
