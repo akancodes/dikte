@@ -6,20 +6,24 @@ import DikteCore
 /// front still gets it. Called on the event-tap thread; the main thread changes it under the same lock.
 final class KeyRouter: @unchecked Sendable {
     private let lock = NSLock()
-    private var machine: HotkeyMachine
+    private var holds: HoldKeys
     private var toggle: ToggleKey?
+    private var nextMode: ToggleKey?
     private var capture: KeyCapture?
     private var eatUps = Set<Int>()
     private var pending = 0
 
-    /// All three are called on the tap thread and must hop to the main thread themselves.
-    var onCommand: (HotkeyCommand) -> Void = { _ in }
+    /// All four are called on the tap thread and must hop to the main thread themselves.
+    /// The mode is the id of the mode whose own shortcut it was, nil for the main shortcut.
+    var onCommand: (HotkeyCommand, String?) -> Void = { _, _ in }
+    var onNextMode: () -> Void = {}
     var onCaptured: (CaptureOutcome, String?) -> Void = { _, _ in }
     var onCancelPending: () -> Void = {}
 
-    init(machine: HotkeyMachine, toggle: ToggleKey?) {
-        self.machine = machine
+    init(holds: HoldKeys, toggle: ToggleKey?, nextMode: ToggleKey?) {
+        self.holds = holds
         self.toggle = toggle
+        self.nextMode = nextMode
     }
 
     private func locked<T>(_ body: () -> T) -> T {
@@ -30,7 +34,8 @@ final class KeyRouter: @unchecked Sendable {
 
     /// Returns true when the event must not reach the app.
     func handle(_ code: Int, isDown: Bool) -> Bool {
-        var command = HotkeyCommand.none
+        var commands: [(command: HotkeyCommand, mode: String?)] = []
+        var nextModeTapped = false
         var cancelPending = false
         var captured: (CaptureOutcome, String?)?
         let swallow: Bool = locked {
@@ -47,43 +52,52 @@ final class KeyRouter: @unchecked Sendable {
                 return true // nothing reaches the apps while a shortcut is being picked
             }
 
+            if let nextMode {
+                let n = nextMode.feed(code, isDown: isDown)
+                if n.command == .toggle { nextModeTapped = true }
+                if n.swallow { return true }
+            }
+
             if let toggle {
                 let t = toggle.feed(code, isDown: isDown)
-                if t.command == .toggle { command = .toggle }
+                if t.command == .toggle { commands.append((.toggle, nil)) }
                 if t.swallow { return true }
             }
 
             // Esc while a transcript is on its way cancels it, and must not reach the app (it would interrupt Claude Code).
-            if code == Key.escape && isDown && !machine.isRecording && pending > 0 {
+            if code == Key.escape && isDown && !holds.isRecording && pending > 0 {
                 cancelPending = true
                 return true
             }
 
-            let r = machine.feed(code, isDown: isDown)
-            if r.command != .none { command = r.command }
+            let r = holds.feed(code, isDown: isDown)
+            commands += r.commands
             return r.swallow
         }
         if let captured { onCaptured(captured.0, captured.1) }
         if cancelPending { onCancelPending() }
-        if command != .none { onCommand(command) }
+        if nextModeTapped { onNextMode() }
+        for c in commands { onCommand(c.command, c.mode) }
         return swallow
     }
 
-    func setMachine(_ m: HotkeyMachine) { locked { machine = m } }
+    func setHolds(_ h: HoldKeys) { locked { holds = h } }
     func setToggle(_ t: ToggleKey?) { locked { toggle = t } }
+    func setNextMode(_ t: ToggleKey?) { locked { nextMode = t } }
     func setPending(_ n: Int) { locked { pending = n } }
     func startCapture() { locked { capture = KeyCapture() } }
     func cancelCapture() { locked { capture = nil } }
-    func enterLocked() { locked { machine.enterLocked() } }
-    func reset() { locked { machine.reset() } }
-    var isRecording: Bool { locked { machine.isRecording } }
-    var isLocked: Bool { locked { machine.isLocked } }
+    func enterLocked() { locked { holds.enterLocked() } }
+    func reset() { locked { holds.reset() } }
+    var isRecording: Bool { locked { holds.isRecording } }
+    var isLocked: Bool { locked { holds.isLocked } }
     var hasPending: Bool { locked { pending > 0 } }
 
     func resync(_ isPhysicallyDown: (Int) -> Bool) -> HotkeyCommand {
         locked {
             toggle?.resync(isPhysicallyDown: isPhysicallyDown)
-            return machine.resync(isPhysicallyDown: isPhysicallyDown)
+            nextMode?.resync(isPhysicallyDown: isPhysicallyDown)
+            return holds.resync(isPhysicallyDown: isPhysicallyDown)
         }
     }
 }

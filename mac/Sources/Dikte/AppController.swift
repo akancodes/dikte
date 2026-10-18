@@ -10,7 +10,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let ducker = Ducker()
     private let stats = Stats(url: Paths.stats)
     private var settings = Settings()
-    private var router = KeyRouter(machine: HotkeyMachine(spec: try! HotkeySpec.parse("fn"), lockKey: Key.space), toggle: nil)
+    private var router = KeyRouter(holds: HoldKeys([(nil, try! HotkeySpec.parse("fn"))], lockKey: Key.space), toggle: nil, nextMode: nil)
     private var tap: EventTap?
     private var history = History(url: Paths.history, size: 20)
     private var window: MainWindow?
@@ -19,6 +19,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var recorder: Recorder?
     private var micTest: Recorder?
     private var recordingStarted = Date()
+    /// The mode the current recording is written in, picked when it started; nil writes the words as heard.
+    private var writeMode: Mode?
+    private var failedMode: Mode?
     private var feedbackShown = false
     private var pending = 0 { didSet { router.setPending(pending) } }
     private var inFlight: [UUID: Task<String, Error>] = [:]
@@ -45,7 +48,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Ducker.recoverFromCrash()
 
         let problem = loadSettings()
-        router = KeyRouter(machine: AppController.machine(settings), toggle: AppController.toggle(settings))
+        router = KeyRouter(holds: AppController.holds(settings), toggle: AppController.tap(settings.toggleHotkey),
+                           nextMode: AppController.tap(settings.nextModeHotkey))
         wireRouter()
         history = History(url: Paths.history, size: settings.historySize)
 
@@ -145,22 +149,34 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         (try? FileManager.default.attributesOfItem(atPath: Paths.settings.path))?[.modificationDate] as? Date
     }
 
-    static func machine(_ s: Settings) -> HotkeyMachine {
+    /// The main hold shortcut plus each mode's own.
+    static func holds(_ s: Settings) -> HoldKeys {
         let spec = (try? HotkeySpec.parse(s.hotkey)) ?? (try! HotkeySpec.parse("fn"))
-        return HotkeyMachine(spec: spec, lockKey: KeyNames.parse(s.handsFreeKey) ?? Key.space)
+        var keys: [(mode: String?, spec: HotkeySpec)] = [(nil, spec)]
+        for m in s.modes where !m.hotkey.isEmpty {
+            if let modeSpec = try? HotkeySpec.parse(m.hotkey) { keys.append((m.id, modeSpec)) }
+        }
+        return HoldKeys(keys, lockKey: KeyNames.parse(s.handsFreeKey) ?? Key.space)
     }
 
-    static func toggle(_ s: Settings) -> ToggleKey? {
-        guard !s.toggleHotkey.trimmingCharacters(in: .whitespaces).isEmpty, let spec = try? HotkeySpec.parse(s.toggleHotkey) else { return nil }
+    /// Every hold shortcut in one string, to tell whether the set changed.
+    static func holdShortcuts(_ s: Settings) -> String {
+        ([s.hotkey, s.handsFreeKey] + s.modes.map { "\($0.id)=\($0.hotkey)" }).joined(separator: "|")
+    }
+
+    static func tap(_ shortcut: String) -> ToggleKey? {
+        guard !shortcut.trimmingCharacters(in: .whitespaces).isEmpty, let spec = try? HotkeySpec.parse(shortcut) else { return nil }
         return ToggleKey(spec: spec)
     }
 
     private func apply(_ fresh: Settings) {
-        let hotkeyChanged = fresh.hotkey != settings.hotkey || fresh.handsFreeKey != settings.handsFreeKey
+        let hotkeyChanged = AppController.holdShortcuts(fresh) != AppController.holdShortcuts(settings)
         let toggleChanged = fresh.toggleHotkey != settings.toggleHotkey
+        let nextModeChanged = fresh.nextModeHotkey != settings.nextModeHotkey
         settings = fresh
-        if hotkeyChanged && recorder == nil { router.setMachine(AppController.machine(fresh)) }
-        if toggleChanged { router.setToggle(AppController.toggle(fresh)) }
+        if hotkeyChanged && recorder == nil { router.setHolds(AppController.holds(fresh)) }
+        if toggleChanged { router.setToggle(AppController.tap(fresh.toggleHotkey)) }
+        if nextModeChanged { router.setNextMode(AppController.tap(fresh.nextModeHotkey)) }
         history = History(url: Paths.history, size: fresh.historySize)
         pushState()
     }
@@ -194,13 +210,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// Merges a partial settings object from the window, checks it, saves it.
-    private func saveFromWindow(_ patch: [String: Any]) {
+    private func saveFromWindow(_ patch: [String: Any], quiet: Bool = false) {
         do {
             let fresh = try settings.merging(patch)
             try fresh.save(Paths.settings)
             settingsStamp = AppController.stamp() // our own write: no "reloaded" message
             apply(fresh)
-            window?.post(["type": "toast", "text": "Saved"])
+            if !quiet { window?.post(["type": "toast", "text": "Saved"]) }
         } catch {
             window?.post(["type": "toast", "text": error.localizedDescription])
             pushState()
@@ -210,7 +226,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: keyboard
 
     private func wireRouter() {
-        router.onCommand = { [weak self] command in Task { @MainActor in self?.run(command) } }
+        router.onCommand = { [weak self] command, mode in Task { @MainActor in self?.run(command, mode: mode) } }
+        router.onNextMode = { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.setActiveMode(Modes.next(self.settings), announce: true)
+            }
+        }
         router.onCaptured = { [weak self] outcome, result in Task { @MainActor in self?.finishCapture(outcome, result) } }
         router.onCancelPending = { [weak self] in Task { @MainActor in self?.cancelPending() } }
     }
@@ -252,7 +274,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Show, sound and quieten only once a hold is clearly meant, so fn+F1 stays silent.
         if !feedbackShown && Date().timeIntervalSince(recordingStarted) > 0.18 {
             feedbackShown = true
-            overlay.showListening { [weak recorder] in recorder?.level ?? 0 }
+            showListening(recorder)
             if router.isLocked { overlay.showHandsFree() }
             if settings.sounds { Sounds.start() }
             if settings.quietOtherAudio { duckSoon(recorder) }
@@ -274,12 +296,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func run(_ command: HotkeyCommand) {
+    private func run(_ command: HotkeyCommand, mode: String? = nil) {
         switch command {
-        case .start: startRecording()
+        case .start: startRecording(mode: mode)
         case .lock:
             guard let recorder else { return }
-            overlay.showListening { [weak recorder] in recorder?.level ?? 0 }
+            showListening(recorder)
             overlay.showHandsFree()
             if !feedbackShown && settings.quietOtherAudio { duckSoon(recorder) }
             feedbackShown = true
@@ -303,9 +325,25 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: recording
 
-    private func startRecording() {
+    private func showListening(_ recorder: Recorder) {
+        if let writeMode {
+            overlay.showListening(title: "Listening · \(writeMode.name)") { [weak recorder] in recorder?.level ?? 0 }
+        } else {
+            overlay.showListening { [weak recorder] in recorder?.level ?? 0 }
+        }
+    }
+
+    /// The app being typed into, by the name the Dock shows ("Terminal", "Code", "iTerm2").
+    static func frontApp() -> String? {
+        guard let app = NSWorkspace.shared.frontmostApplication, app.bundleIdentifier != Bundle.main.bundleIdentifier else { return nil }
+        return app.localizedName ?? app.bundleURL?.deletingPathExtension().lastPathComponent
+    }
+
+    private func startRecording(mode: String? = nil) {
         guard recorder == nil else { return }
         stopMicTest()
+        // Picked now, while the app being typed into is still the one in front.
+        writeMode = Modes.resolve(settings, forced: mode, app: AppController.frontApp())
         if Permissions.microphone == "denied" {
             router.reset()
             fail("Microphone access is off", "System Settings → Privacy & Security → Microphone → Dikte")
@@ -378,12 +416,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         if settings.sounds { Sounds.stop() }
-        await process(wav, length: length)
+        await process(wav, length: length, mode: writeMode)
     }
 
     // MARK: transcribing
 
-    private func process(_ wav: Data, length: Double) async {
+    private func process(_ wav: Data, length: Double, mode: Mode?) async {
         guard let key = KeyStore.get() else {
             failedAudio = wav
             overlay.showMessage("Connect your OpenAI key first", "The recording is kept: retry it from the menu bar", seconds: 5)
@@ -399,7 +437,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         pending += 1
         updateIcon()
-        if recorder == nil { overlay.showWorking() }
+        if recorder == nil { overlay.showWorking(mode.map { "Writing · \($0.name)" } ?? "Transcribing") }
         pushState()
         let clock = Date()
         let id = UUID()
@@ -415,10 +453,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let work = Task { () async throws -> String in
                 let text = try await api.transcribe(wav: wav, settings: s, apiKey: key)
                 Log.write("Transcribed \(String(format: "%.1f", length)) s in \(Int(Date().timeIntervalSince(clock) * 1000)) ms")
-                guard s.cleanup, !text.isEmpty else { return text }
-                do { return try await api.cleanup(text, settings: s, apiKey: key) }
+                guard let mode, !text.isEmpty else { return text }
+                do { return try await api.rewrite(text, mode: mode, settings: s, apiKey: key) }
                 catch is CancellationError { throw CancellationError() }
-                catch { Log.write("Clean-up skipped: \(error.localizedDescription)"); return text }
+                catch { Log.write("\(mode.name) skipped, writing the words as heard: \(error.localizedDescription)"); return text }
             }
             inFlight[id] = work
             var text = try await work.value
@@ -433,6 +471,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             history.add(text)
             stats.record(at: Date(), words: words, seconds: length, model: s.model)
             failedAudio = nil
+            failedMode = nil
 
             if let window, window.isFrontmost {
                 // Dictated with Dikte's own window in front: show it there instead of pasting into the page.
@@ -447,11 +486,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if recorder == nil { overlay.showMessage("Cancelled", "", seconds: 1.2) }
         } catch let error as ApiError {
             failedAudio = wav
+            failedMode = mode
             try? wav.write(to: Paths.failedAudio)
             Log.write("Transcription failed: \(error.message)")
             fail(error.message, "The recording is kept: Retry from the menu bar")
         } catch {
             failedAudio = wav
+            failedMode = mode
             Log.write("Unexpected failure: \(error)")
             fail("Something went wrong", error.localizedDescription)
         }
@@ -477,7 +518,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: picking a shortcut
 
     private func startCapture(_ target: String) {
-        guard recorder == nil, ["hotkey", "toggleHotkey"].contains(target) else { return }
+        let known = ["hotkey", "toggleHotkey", "nextModeHotkey"].contains(target)
+            || (target.hasPrefix("mode:") && settings.modes.contains { "mode:" + $0.id == target })
+        guard recorder == nil, known else { return }
         router.startCapture()
         captureTarget = target
         captureStarted = Date()
@@ -490,7 +533,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         captureTarget = nil
         if outcome == .done, let target, let result {
             Log.write("Shortcut picked for \(target): \(result)")
-            saveFromWindow([target: result])
+            if target.hasPrefix("mode:") {
+                saveFromWindow(["modes": modesPatch(String(target.dropFirst(5))) { $0.hotkey = result }])
+            } else {
+                saveFromWindow([target: result])
+            }
             return
         }
         if outcome == .unusable { window?.post(["type": "toast", "text": "That key cannot be a shortcut. Try another."]) }
@@ -537,8 +584,44 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case "openPermission": Permissions.open(m["which"] as? String ?? "")
         case "openLog": AppController.openInTextEdit(Paths.log)
         case "openSettingsFile": AppController.openInTextEdit(Paths.settings)
+        case "setMode": setActiveMode(m["id"] as? String ?? Modes.plain, announce: false)
+        case "listApps": window?.post(["type": "apps", "apps": AppController.openApps()])
         default: break
         }
+    }
+
+    // MARK: modes
+
+    /// The menu, the window and the next-mode shortcut all switch the active mode through here.
+    private func setActiveMode(_ id: String, announce: Bool) {
+        guard id == Modes.plain || settings.modes.contains(where: { $0.id == id }) else { return }
+        if id != settings.activeMode {
+            saveFromWindow(["activeMode": id], quiet: true)
+            Log.write("Active mode: \(id)")
+        }
+        guard announce, recorder == nil else { return }
+        var hint = ""
+        if let app = AppController.frontApp(),
+           let byApp = settings.modes.first(where: { $0.apps.contains { Modes.normalize($0) == Modes.normalize(app) } }) {
+            hint = "\(byApp.name) is still used in \(app)"
+        }
+        overlay.showMessage("Mode: \(Modes.nameOf(settings, id))", hint, seconds: 1.8)
+    }
+
+    /// The modes as JSON with one of them changed, for a save patch.
+    private func modesPatch(_ id: String, _ change: (inout Mode) -> Void) -> Any {
+        var modes = settings.modes
+        if let i = modes.firstIndex(where: { $0.id == id }) { change(&modes[i]) }
+        let data = (try? JSONEncoder().encode(modes)) ?? Data("[]".utf8)
+        return (try? JSONSerialization.jsonObject(with: data)) ?? []
+    }
+
+    /// Apps in the Dock, by name, for picking which ones a mode is used in.
+    static func openApps() -> [String] {
+        let names = NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != Bundle.main.bundleIdentifier }
+            .compactMap(\.localizedName)
+        return Array(Set(names)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
     private func setKey(_ raw: String) async {
@@ -579,6 +662,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             "stats": stats.summary(now: Date()).json,
             "autostart": Autostart.isEnabled,
             "capture": captureTarget ?? NSNull(),
+            "codingApps": Modes.codingApps,
             "permissions": ["accessibility": tap != nil, "microphone": Permissions.microphone] as [String: Any],
             "globeHint": usesFn && Permissions.globeKeyBusy,
         ]
@@ -653,6 +737,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.removeAllItems()
         menu.addItem(item("Open Dikte", #selector(menuOpen)))
         menu.addItem(item(recorder == nil ? "Start hands-free dictation" : "Stop and send", #selector(menuToggle)))
+        let modes = NSMenuItem(title: "Mode: \(Modes.nameOf(settings, settings.activeMode))", action: nil, keyEquivalent: "")
+        let sub = NSMenu()
+        for (id, name) in [(Modes.plain, Modes.nameOf(settings, Modes.plain))] + settings.modes.map({ ($0.id, $0.name) }) {
+            let choice = item(name, #selector(menuMode(_:)))
+            choice.representedObject = id
+            choice.state = id == settings.activeMode ? .on : .off
+            sub.addItem(choice)
+        }
+        modes.submenu = sub
+        menu.addItem(modes)
         if failedAudio != nil { menu.addItem(item("Retry last recording", #selector(menuRetry))) }
         menu.addItem(.separator())
         menu.addItem(item("Quit Dikte", #selector(menuQuit), key: "q"))
@@ -667,11 +761,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func menuOpen() { openWindow() }
     @objc private func menuToggle() { toggleDictation() }
     @objc private func menuQuit() { NSApp.terminate(nil) }
+    @objc private func menuMode(_ sender: NSMenuItem) { setActiveMode(sender.representedObject as? String ?? Modes.plain, announce: false) }
 
     @objc private func menuRetry() {
         guard let wav = failedAudio else { return }
         errorMessage = nil
         errorHint = nil
-        Task { await process(wav, length: Double(wav.count - 44) / Double(Recorder.sampleRate * 2)) }
+        Task { await process(wav, length: Double(wav.count - 44) / Double(Recorder.sampleRate * 2), mode: failedMode) }
     }
 }
