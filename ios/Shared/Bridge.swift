@@ -22,7 +22,7 @@ enum Bridge {
 
     enum Signal: String, CaseIterable {
         // keyboard → app
-        case start, stop, cancel
+        case start, stop, cancel, mode
         // app → keyboard
         case changed
 
@@ -67,6 +67,24 @@ struct Dictation: Codable, Equatable {
 struct KeyboardSeen: Codable, Equatable {
     var at = Date()
     var fullAccess: Bool
+}
+
+/// The modes, as the keyboard shows them in its strip. Written by the app whenever they change.
+struct ModeMenu: Codable, Equatable {
+    struct Item: Codable, Equatable {
+        var id: String
+        var name: String
+    }
+
+    /// "plain" is the words as heard.
+    var active = "plain"
+    var items: [Item] = []
+}
+
+/// The mode picked on the keyboard; the app makes it the active mode.
+struct ModeChoice: Codable, Equatable {
+    var id: String
+    var at = Date()
 }
 
 /// The keyboard's settings, made in the app.

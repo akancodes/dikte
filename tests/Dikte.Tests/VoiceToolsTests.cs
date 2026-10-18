@@ -59,7 +59,9 @@ public class HoldKeysTests
 {
     const int Mouse4 = KeyNames.VkXButton1, LCtrl = HotkeySpec.VkLControl, Space = 0x20;
 
-    static HoldKeys Keys() => new(new[]
+    static (HotkeyCommand, HoldTarget) C(HotkeyCommand c, DictationMode m) => (c, m);
+
+    static HoldKeys Keys() => new(new (HoldTarget, HotkeySpec)[]
     {
         (DictationMode.Dictate, HotkeySpec.Parse("mouse4")),
         (DictationMode.Translate, HotkeySpec.Parse("ctrl+mouse4")),
@@ -71,9 +73,9 @@ public class HoldKeysTests
     {
         var k = Keys();
         var r = k.Feed(0x78, true); // F9
-        Assert.Equal((HotkeyCommand.Start, DictationMode.Edit), Assert.Single(r.Commands));
+        Assert.Equal(C(HotkeyCommand.Start, DictationMode.Edit), Assert.Single(r.Commands));
         Assert.True(r.Swallow);
-        Assert.Equal((HotkeyCommand.StopAndSend, DictationMode.Edit), Assert.Single(k.Feed(0x78, false).Commands));
+        Assert.Equal(C(HotkeyCommand.StopAndSend, DictationMode.Edit), Assert.Single(k.Feed(0x78, false).Commands));
     }
 
     [Fact]
@@ -82,10 +84,10 @@ public class HoldKeysTests
         var k = Keys();
         k.Feed(LCtrl, true);
         var r = k.Feed(Mouse4, true);
-        Assert.Equal((HotkeyCommand.Start, DictationMode.Translate), Assert.Single(r.Commands));
+        Assert.Equal(C(HotkeyCommand.Start, DictationMode.Translate), Assert.Single(r.Commands));
         Assert.True(r.Swallow);
         var up = k.Feed(Mouse4, false);
-        Assert.Equal((HotkeyCommand.StopAndSend, DictationMode.Translate), Assert.Single(up.Commands));
+        Assert.Equal(C(HotkeyCommand.StopAndSend, DictationMode.Translate), Assert.Single(up.Commands));
         Assert.True(up.Swallow);
         Assert.False(k.IsRecording);
     }
@@ -94,7 +96,7 @@ public class HoldKeysTests
     public void Plain_shortcut_alone_dictates()
     {
         var k = Keys();
-        Assert.Equal((HotkeyCommand.Start, DictationMode.Dictate), Assert.Single(k.Feed(Mouse4, true).Commands));
+        Assert.Equal(C(HotkeyCommand.Start, DictationMode.Dictate), Assert.Single(k.Feed(Mouse4, true).Commands));
     }
 
     [Fact]
@@ -103,7 +105,7 @@ public class HoldKeysTests
         var k = Keys();
         k.Feed(Mouse4, true);
         var r = k.Feed(LCtrl, true);
-        Assert.Equal(new[] { (HotkeyCommand.Cancel, DictationMode.Dictate), (HotkeyCommand.Start, DictationMode.Translate) }, r.Commands);
+        Assert.Equal(new[] { C(HotkeyCommand.Cancel, DictationMode.Dictate), C(HotkeyCommand.Start, DictationMode.Translate) }, r.Commands);
     }
 
     [Fact]
@@ -117,7 +119,19 @@ public class HoldKeysTests
         Assert.True(k.IsLocked);
         Assert.Empty(k.Feed(0x78, true).Commands); // F9 does not start an edit on top
         k.Feed(0x78, false);
-        Assert.Equal((HotkeyCommand.StopAndSend, DictationMode.Dictate), Assert.Single(k.Feed(Mouse4, true).Commands));
+        Assert.Equal(C(HotkeyCommand.StopAndSend, DictationMode.Dictate), Assert.Single(k.Feed(Mouse4, true).Commands));
+    }
+
+    [Fact]
+    public void A_mode_shortcut_carries_its_mode()
+    {
+        var k = new HoldKeys(new (HoldTarget, HotkeySpec)[]
+        {
+            (DictationMode.Dictate, HotkeySpec.Parse("mouse4")),
+            (new HoldTarget(DictationMode.Dictate, "prompt"), HotkeySpec.Parse("ctrl+mouse4")),
+        }, Space);
+        k.Feed(LCtrl, true);
+        Assert.Equal((HotkeyCommand.Start, new HoldTarget(DictationMode.Dictate, "prompt")), Assert.Single(k.Feed(Mouse4, true).Commands));
     }
 }
 

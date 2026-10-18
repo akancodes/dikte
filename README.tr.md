@@ -52,6 +52,15 @@ yeniden aç.
 | Sonunda ayrı bir cümle olarak "gönder" de | Metinden sonra Enter'a basar: Claude Code'da prompt'u gönderir |
 | Sadece "sil" de | Son dikteyi geri siler |
 
+**Modlar** (Windows, Mac ve iPhone): sözlerinin nasıl yazılacağı. Her mod kendi cümlelerinle yazdığın bir talimattır;
+bir sohbet modeli onu konuşmana uygular, konuşmanı asla cevaplamaz. Beş tanesi hazır gelir, düzenlenir, silinir, yenisi eklenir:
+Olduğu gibi (modelsiz, varsayılan), Clean up (temizle), Prompt (Claude Code için düzgün bir prompt), List (madde listesi),
+Commit message, Email.
+
+Hangisinin kullanılacağı: modun kendi kısayolu önce gelir, sonra öndeki uygulama (Prompt; Windows Terminal, VS Code,
+Cursor, Claude uygulaması, Terminal, iTerm2 gibi yerlerde kendiliğinden devrede), sonra aktif mod. Aktif modu pencerenin
+ana sayfasından, tepsi/menü çubuğu menüsünden, sonraki mod kısayoluyla ya da iPhone'da klavyenin üst şeridinden seçersin.
+
 Türkçe ve İngilizceyi cümle içinde karıştırabilirsin; `language` boş kalsın. Ayarlar, gizlilik ve derleme için
 [İngilizce README](README.md).
 

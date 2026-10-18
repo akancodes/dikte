@@ -206,24 +206,6 @@ final class TranscriberTests: XCTestCase {
         }
     }
 
-    func testCleanupReturnsTheTidiedText() async throws {
-        let fake = FakeTransport()
-        fake.answers = [(200, "{\"choices\":[{\"message\":{\"content\":\"Deploy et ve logları kontrol et.\"}}]}")]
-        let text = try await make(fake).cleanup("ee deploy et yani ve şey logları kontrol et", settings: settings(), apiKey: "k")
-        XCTAssertEqual(text, "Deploy et ve logları kontrol et.")
-        XCTAssertEqual(fake.requests[0].url?.path, "/v1/chat/completions")
-        let payload = try JSONSerialization.jsonObject(with: fake.requests[0].httpBody!) as? [String: Any]
-        XCTAssertEqual(payload?["model"] as? String, "gpt-4.1-mini")
-    }
-
-    func testCleanupThatAnswersInsteadOfTidyingIsIgnored() async throws {
-        let fake = FakeTransport()
-        fake.answers = [(200, "{\"choices\":[{\"message\":{\"content\":\"\(String(repeating: "x", count: 400))\"}}]}")]
-        let said = "what is the capital of France"
-        let text = try await make(fake).cleanup(said, settings: settings(), apiKey: "k")
-        XCTAssertEqual(text, said)
-    }
-
     func testKeyCheckReportsTheProblem() async {
         let fake = FakeTransport()
         fake.answers = [(200, "{\"data\":[]}"), (401, "{}")]

@@ -87,6 +87,25 @@ static partial class Native
     [LibraryImport("user32.dll")]
     public static partial IntPtr GetForegroundWindow();
 
+    [LibraryImport("user32.dll")]
+    public static partial uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    /// <summary>The process name of the app in front ("WindowsTerminal", "Code"), or null.</summary>
+    public static string? ForegroundApp()
+    {
+        var hwnd = GetForegroundWindow();
+        if (hwnd == IntPtr.Zero || GetWindowThreadProcessId(hwnd, out var pid) == 0) return null;
+        try
+        {
+            using var p = System.Diagnostics.Process.GetProcessById((int)pid);
+            return p.ProcessName;
+        }
+        catch (Exception e) when (e is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return null;
+        }
+    }
+
     [LibraryImport("dwmapi.dll")]
     public static partial int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 

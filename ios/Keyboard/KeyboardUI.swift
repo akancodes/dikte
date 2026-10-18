@@ -37,7 +37,9 @@ struct ToolbarView: View {
             }
             .padding(.leading, 8)
         default:
-            if !model.suggestions.isEmpty {
+            if model.pickingMode, let menu = model.modeMenu {
+                modeRow(menu)
+            } else if !model.suggestions.isEmpty {
                 suggestionRow
             } else {
                 idleRow
@@ -63,6 +65,26 @@ struct ToolbarView: View {
         }
     }
 
+    /// Every mode as a chip; a tap makes it the active one.
+    private func modeRow(_ menu: ModeMenu) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach([ModeMenu.Item(id: "plain", name: "As spoken")] + menu.items, id: \.id) { item in
+                    Button { model.chooseMode(item.id) } label: {
+                        Text(item.name)
+                            .font(.footnote.weight(.semibold))
+                            .lineLimit(1)
+                            .padding(.horizontal, 12).padding(.vertical, 7)
+                            .foregroundStyle(item.id == menu.active ? Color.white : Color.primary)
+                            .background(item.id == menu.active ? Tone.violet : Color.primary.opacity(0.08), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 4)
+        }
+    }
+
     private var idleRow: some View {
         HStack(spacing: 10) {
             HStack(spacing: 6) {
@@ -70,6 +92,17 @@ struct ToolbarView: View {
                 Text(model.sessionOn ? "Mic on" : "Mic off").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
             }
             .padding(.leading, 8)
+            if model.modeMenu != nil {
+                Button { model.pickingMode = true } label: {
+                    Label(model.activeModeName, systemImage: "wand.and.stars")
+                        .font(.footnote.weight(.semibold))
+                        .lineLimit(1)
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .foregroundStyle(model.activeModeName == "As spoken" ? Color.primary : Tone.violet)
+                        .background(Color.primary.opacity(0.08), in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
             if model.lastText != nil {
                 Button { model.insertLast() } label: {
                     Label("Last", systemImage: "arrow.uturn.backward")
