@@ -125,21 +125,36 @@ public final class Transcriber {
     }
 
     public func cleanup(_ text: String, settings s: Settings, apiKey: String) async throws -> String {
+        var cleaned = try await chat(Transcriber.cleanupPrompt, "<transcript>\n\(text)\n</transcript>", model: s.cleanupModel, settings: s, apiKey: apiKey)
+        cleaned = cleaned.replacingOccurrences(of: "<transcript>", with: "").replacingOccurrences(of: "</transcript>", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        // A clean-up that grew the text a lot has answered instead of tidying; keep what was said.
+        return cleaned.isEmpty || Double(cleaned.count) > Double(text.count) * 1.5 + 40 ? text : cleaned
+    }
+
+    /// The transcript written the way a mode says.
+    public func rewrite(_ text: String, mode: Mode, settings s: Settings, apiKey: String) async throws -> String {
+        let model = mode.model.isEmpty ? s.cleanupModel : mode.model
+        var rewritten = try await chat(Modes.systemPrompt, "<mode>\n\(mode.instruction)\n</mode>\n<transcript>\n\(text)\n</transcript>",
+                                       model: model, settings: s, apiKey: apiKey)
+        rewritten = rewritten.replacingOccurrences(of: "<transcript>", with: "").replacingOccurrences(of: "</transcript>", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        // Far longer than what was said: it answered instead of rewriting. The words as spoken are safer.
+        return rewritten.isEmpty || Double(rewritten.count) > Double(text.count) * 2.5 + 200 ? text : rewritten
+    }
+
+    func chat(_ system: String, _ user: String, model: String, settings s: Settings, apiKey: String) async throws -> String {
         let payload: [String: Any] = [
-            "model": s.cleanupModel,
+            "model": model,
             "messages": [
-                ["role": "system", "content": Transcriber.cleanupPrompt],
-                ["role": "user", "content": "<transcript>\n\(text)\n</transcript>"],
+                ["role": "system", "content": system],
+                ["role": "user", "content": user],
             ],
         ]
         let json = try await send(request(s, apiKey, "chat/completions", try JSONSerialization.data(withJSONObject: payload), contentType: "application/json"))
         let choices = json["choices"] as? [[String: Any]]
         let message = choices?.first?["message"] as? [String: Any]
-        var cleaned = ((message?["content"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        cleaned = cleaned.replacingOccurrences(of: "<transcript>", with: "").replacingOccurrences(of: "</transcript>", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        // A clean-up that grew the text a lot has answered instead of tidying; keep what was said.
-        return cleaned.isEmpty || Double(cleaned.count) > Double(text.count) * 1.5 + 40 ? text : cleaned
+        return ((message?["content"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Checks a key by listing models; returns nil when it works, else the reason.
