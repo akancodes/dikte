@@ -122,6 +122,10 @@ main::-webkit-scrollbar { width: 10px; } main::-webkit-scrollbar-thumb { backgro
 .bind + .bind { border-top: 1px solid var(--line); }
 .bind .what b { display: block; font-weight: 600; } .bind .what small { color: var(--muted); font-size: 12.5px; }
 .bind .acts { display: flex; gap: 6px; }
+.tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0 28px; }
+.tools .bind + .bind { border-top: none; }
+.cmds { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.cmds span { font-size: 12.5px; padding: 3px 9px; border-radius: 99px; background: var(--line); }
 .bind .caps { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 38px; }
 .cap { display: inline-flex; align-items: center; padding: 5px 12px; border-radius: 9px; background: var(--chip); font-weight: 650;
   border: 1px solid var(--line); border-bottom-width: 3px; }
@@ -137,7 +141,7 @@ main::-webkit-scrollbar { width: 10px; } main::-webkit-scrollbar-thumb { backgro
 .chip.on { background: var(--chip-on); color: var(--chip-on-text); }
 .row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 8px 0; }
 .row + .row { border-top: 1px solid var(--line); }
-.row label { flex: 1; } .row small { display: block; color: var(--muted); font-size: 12.5px; }
+.row label:not(.toggle) { flex: 1; } .row small { display: block; color: var(--muted); font-size: 12.5px; }
 .toggle { position: relative; width: 42px; height: 24px; flex: none; }
 .toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
 .toggle span { position: absolute; inset: 0; border-radius: 99px; background: var(--line); transition: .2s; cursor: pointer; }
@@ -261,6 +265,19 @@ details .adv label { font-size: 12.5px; color: var(--muted); display: grid; gap:
         </div>
       </div>
 
+      <div class="card" id="toolsCard" style="grid-column:1/-1">
+        <h3>Voice tools</h3>
+        <p class="sub">Each one is optional: set a shortcut to switch it on.</p>
+        <div class="tools">
+          <div class="bind" id="bind-translateHotkey"></div>
+          <div class="bind" id="bind-editHotkey"></div>
+          <div class="bind" id="bind-repasteHotkey"></div>
+        </div>
+        <div class="row"><label>Voice commands<small>Words that act instead of being written</small>
+            <span class="cmds"><span>new line</span><span>new paragraph</span><span>… send = Enter</span><span>delete that</span><span>yeni satır</span><span>… gönder</span><span>sil</span></span></label>
+          <label class="toggle"><input type="checkbox" id="voiceCommands"><span></span></label></div>
+      </div>
+
       <details class="card" style="grid-column:1/-1">
         <summary>Advanced</summary>
         <div class="adv">
@@ -277,7 +294,8 @@ details .adv label { font-size: 12.5px; color: var(--muted); display: grid; gap:
           <label id="pasteShortcutBox">Paste shortcut
             <select class="field" id="pasteShortcut"><option value="ctrl+v">Ctrl + V</option><option value="ctrl+shift+v">Ctrl + Shift + V</option><option value="shift+insert">Shift + Insert</option></select></label>
           <label>Longest recording (minutes)<input class="field" id="maxMinutes" type="number" min="1" max="12"></label>
-          <label>Tidy-up model<input class="field" id="cleanupModel"></label>
+          <label>Tidy-up, translate and edit model<input class="field" id="cleanupModel"></label>
+          <label id="translateToBox">Language the translate shortcut writes<input class="field" id="translateTo"></label>
         </div>
         <div class="inline" style="margin-top:14px"><button class="btn" data-send="openLog">Open log</button><button class="btn" data-send="openSettingsFile">Open settings file</button></div>
       </details>
@@ -441,6 +459,16 @@ function renderSettings() {
   const c = S.settings;
   renderBind("hotkey", "Hold to talk", "Listens while held, sends when let go. Space while holding: hands-free.", c.hotkey, false);
   renderBind("toggleHotkey", "Tap to start, tap to send", "One press starts listening hands-free, the next sends.", c.toggleHotkey, true);
+  // Windows only for now: the Mac app has none of these settings yet.
+  const tools = !mac() && "editHotkey" in c;
+  $("toolsCard").style.display = tools ? "" : "none";
+  $("translateToBox").style.display = tools ? "" : "none";
+  if (tools) {
+    renderBind("translateHotkey", `Hold to write in ${esc(c.translateTo)}`, `Speak any language; it is written in ${esc(c.translateTo)}.`, c.translateHotkey, true);
+    renderBind("editHotkey", "Hold to edit the selection", "Select text, hold, say what to change (\u201cshorter\u201d, \u201cmore formal\u201d). Nothing selected: it writes what you ask for.", c.editHotkey, true);
+    renderBind("repasteHotkey", "Paste the last one again", "Tap to paste your last dictation where you are now.", c.repasteHotkey, true);
+    $("voiceCommands").checked = c.voiceCommands;
+  }
 
   // The first eight plus any picked; the rest behind "More" so the card stays small.
   const shown = S.languages.filter(([code], i) => showAllLangs || i < 8 || c.languages.includes(code));
@@ -477,6 +505,7 @@ function renderSettings() {
   $("quietValue").textContent = c.quietLevel === 0 ? "Muted" : `${Math.round(c.quietLevel * 100)}% of their volume`;
   setIfIdle($("vocabulary"), c.vocabulary);
   for (const id of ["model", "apiBase", "insertMode", "pasteShortcut", "maxMinutes", "cleanupModel"]) setIfIdle($(id), c[id]);
+  if (tools) setIfIdle($("translateTo"), c.translateTo);
   if (![...$("model").options].some(o => o.value === c.model)) { $("model").add(new Option(c.model, c.model)); $("model").value = c.model; }
   $("keyInfo").innerHTML = S.hasKey ? `Connected · <span class="key">${esc(S.keyHint)}</span>` : "Not set";
 }
@@ -484,7 +513,7 @@ function renderSettings() {
 // ---------- saving ----------
 function save(patch) { send({ type: "save", settings: patch }); }
 const debounce = (f, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => f(...a), ms); }; };
-for (const id of ["quietOtherAudio", "sounds", "cleanup", "appendSpace"]) $(id).onchange = e => save({ [id]: e.target.checked });
+for (const id of ["quietOtherAudio", "sounds", "cleanup", "appendSpace", "voiceCommands"]) $(id).onchange = e => save({ [id]: e.target.checked });
 $("autostart").onchange = e => send({ type: "autostart", on: e.target.checked });
 $("autoUpdate").onchange = e => save({ autoUpdate: e.target.checked });
 $("checkUpdates").onclick = () => send({ type: "checkUpdates" });
@@ -492,7 +521,7 @@ $("quietLevel").oninput = debounce(e => save({ quietLevel: +e.target.value / 100
 $("mic-select").onchange = e => save({ microphone: e.target.value });
 $("vocabulary").oninput = debounce(e => save({ vocabulary: e.target.value }), 600);
 for (const id of ["model", "insertMode", "pasteShortcut"]) $(id).onchange = e => save({ [id]: e.target.value });
-for (const id of ["apiBase", "cleanupModel"]) $(id).onchange = e => save({ [id]: e.target.value.trim() });
+for (const id of ["apiBase", "cleanupModel", "translateTo"]) $(id).onchange = e => save({ [id]: e.target.value.trim() });
 $("maxMinutes").onchange = e => save({ maxMinutes: +e.target.value });
 $("micTest").onclick = () => send({ type: "micTest" });
 $("mic").onclick = () => S?.hasKey && send({ type: "toggleDictation" });

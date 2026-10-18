@@ -64,6 +64,9 @@ public sealed class HotkeySpec
 
     public bool Contains(int vk) => _slots.Any(slot => slot.Contains(vk));
 
+    /// <summary>How many keys make it up: ctrl+mouse4 (2) is more specific than mouse4 (1).</summary>
+    public int Size => _slots.Count;
+
     /// <summary>A non-modifier key of the hotkey (F8, CapsLock...), whose events must not reach the app.</summary>
     public bool IsPlainKey(int vk) => Contains(vk) && !ModifierVks.Contains(vk);
 
