@@ -50,6 +50,17 @@ dictations and what you have spent, and holds every setting. Closing it leaves D
 | `Esc` | Cancels the recording, or the transcript still on its way |
 | Left-click the tray icon (Mac: the menu-bar icon's menu) | Starts/stops hands-free dictation with the mouse |
 
+**Voice tools** (Windows; each needs a shortcut set in Settings first):
+
+| Do this | And |
+|---|---|
+| Hold the translate shortcut and talk in any language | It is written in English (or `translateTo`) |
+| Select text, hold the edit shortcut, say "shorter" / "more formal" / "fix the grammar" | The selection is replaced by the edited text; with nothing selected it writes what you ask for |
+| Tap the paste-again shortcut | Pastes your last dictation again, where you are now |
+| Say "new line" / "new paragraph" (Turkish: "yeni satır" / "yeni paragraf") | A line break instead of the words |
+| End with "send" or "gönder" as its own sentence | Presses Enter after the text: sends a prompt in Claude Code or a chat |
+| Say only "delete that" (or "sil") | Takes the last dictation back out |
+
 Both shortcuts are picked in Settings by pressing them: any key, key combination, or the middle and side mouse
 buttons (`Mouse 4` / `Mouse 5`, which then stop doing "back" and "forward"). A short hold that turns into a shortcut (`Ctrl + Win + →`, `Fn + F1`...) is cancelled silently and the shortcut
 works as usual. Mixing languages is fine: pick the ones you speak in Settings and the model is told to write each word
@@ -69,6 +80,11 @@ apply at once): `%APPDATA%\Dikte\` on Windows, `~/Library/Application Support/Di
 | `hotkey` | `ctrl+win`, Mac `fn` | Hold to talk. Any combination: `rctrl`, `f8`, `mouse4`, `ctrl+shift+space`; on a Mac also `rcmd`, `ctrl+opt`... |
 | `toggleHotkey` | `""` | Tap to start hands-free, tap again to send; `mouse5`, `f9`... |
 | `handsFreeKey` | `space` | Pressed while holding the hotkey |
+| `translateHotkey` | `""` | Windows: hold to talk in any language, written in `translateTo` |
+| `translateTo` | `English` | |
+| `editHotkey` | `""` | Windows: hold to say what to do with the selected text |
+| `repasteHotkey` | `""` | Windows: tap to paste the last dictation again |
+| `voiceCommands` | `true` | Windows: "new line", "send" at the end, "delete that" alone act instead of being written |
 | `model` | `gpt-transcribe` | Also `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1` |
 | `languages` | `[]` | Codes of the languages you speak: none = detect, one = pinned, several = mixed freely |
 | `vocabulary` | `Claude Code, ...` | Names and terms to spell your way, sent as the model's prompt |
@@ -76,7 +92,7 @@ apply at once): `%APPDATA%\Dikte\` on Windows, `~/Library/Application Support/Di
 | `insertMode` | `paste` | `paste` (clipboard + shortcut, the clipboard is restored) or `type` (key by key, leaves the clipboard alone) |
 | `pasteShortcut` | `ctrl+v` | Windows: `ctrl+shift+v` or `shift+insert` for terminals that want them (a Mac always uses `⌘V`) |
 | `cleanup` | `false` | Runs the text through `cleanupModel` to drop "um"s and apply "no wait" corrections (+~1 s) |
-| `cleanupModel` | `gpt-4.1-mini` | |
+| `cleanupModel` | `gpt-4.1-mini` | Also used to translate and to edit |
 | `appendSpace` | `true` | So two dictations in a row do not run together |
 | `microphone` | `""` | Empty = the system default |
 | `sounds` | `true` | |

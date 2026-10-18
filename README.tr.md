@@ -41,6 +41,17 @@ yeniden aç.
 | `Esc` | Kaydı ya da yoldaki yazıyı iptal eder |
 | Tepsi simgesine sol tık (Mac: menü çubuğu simgesinin menüsü) | Eller serbest dikteyi fareyle başlatır/bitirir |
 
+**Ses araçları** (Windows; her biri için önce Ayarlar'da bir kısayol seç):
+
+| Ne yaparsan | Ne olur |
+|---|---|
+| Çeviri kısayolunu basılı tutup herhangi bir dilde konuş | İngilizce yazılır |
+| Metni seç, düzenleme kısayolunu basılı tut, "kısalt" / "daha resmi yap" de | Seçili metin düzenlenmiş haliyle değişir; seçim yoksa istediğini yazar |
+| Tekrar yapıştır kısayoluna dokun | Son dikteyi bulunduğun yere tekrar yapıştırır |
+| "Yeni satır" / "yeni paragraf" de | Kelimeler yerine satır atlar |
+| Sonunda ayrı bir cümle olarak "gönder" de | Metinden sonra Enter'a basar: Claude Code'da prompt'u gönderir |
+| Sadece "sil" de | Son dikteyi geri siler |
+
 Türkçe ve İngilizceyi cümle içinde karıştırabilirsin; `language` boş kalsın. Ayarlar, gizlilik ve derleme için
 [İngilizce README](README.md).
 

@@ -14,6 +14,20 @@ public sealed class Settings
     /// <summary>Pressed while holding the hotkey: keeps listening hands-free until the hotkey is pressed again.</summary>
     public string HandsFreeKey { get; set; } = "space";
 
+    /// <summary>Hold to dictate in <see cref="TranslateTo"/> whatever language is spoken. Empty: none.</summary>
+    public string TranslateHotkey { get; set; } = "";
+
+    /// <summary>Hold, say what to do with the selected text ("make it shorter"), let go: the selection is replaced.</summary>
+    public string EditHotkey { get; set; } = "";
+
+    /// <summary>Tap to paste the last dictation again. Empty: none.</summary>
+    public string RepasteHotkey { get; set; } = "";
+
+    public string TranslateTo { get; set; } = "English";
+
+    /// <summary>"new line", "send" at the end, "delete that" alone (and their Turkish twins) act instead of being written.</summary>
+    public bool VoiceCommands { get; set; } = true;
+
     /// <summary>Any OpenAI-compatible server: https://api.openai.com/v1, https://api.groq.com/openai/v1, a local whisper server...</summary>
     public string ApiBase { get; set; } = "https://api.openai.com/v1";
 
@@ -97,12 +111,15 @@ public sealed class Settings
     public void Validate()
     {
         HotkeySpec.Parse(Hotkey);
-        if (!string.IsNullOrWhiteSpace(ToggleHotkey))
+        var taken = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { [Hotkey.Replace(" ", "")] = "Hold to talk" };
+        foreach (var (shortcut, name) in new[] { (ToggleHotkey, "Tap to talk"), (TranslateHotkey, $"Write in {TranslateTo}"), (EditHotkey, "Edit the selection"), (RepasteHotkey, "Paste again") })
         {
-            HotkeySpec.Parse(ToggleHotkey);
-            if (string.Equals(ToggleHotkey.Replace(" ", ""), Hotkey.Replace(" ", ""), StringComparison.OrdinalIgnoreCase))
-                throw new FormatException("The tap shortcut must differ from the hold shortcut.");
+            if (string.IsNullOrWhiteSpace(shortcut)) continue;
+            HotkeySpec.Parse(shortcut);
+            if (!taken.TryAdd(shortcut.Replace(" ", ""), name))
+                throw new FormatException($"{name} and {taken[shortcut.Replace(" ", "")]} cannot share a shortcut.");
         }
+        if (string.IsNullOrWhiteSpace(TranslateTo)) throw new FormatException("translateTo is empty.");
         if (!KeyNames.TryParse(HandsFreeKey, out _)) throw new FormatException($"Unknown handsFreeKey \"{HandsFreeKey}\".");
         if (InsertMode is not ("paste" or "type")) throw new FormatException("insertMode must be \"paste\" or \"type\".");
         if (PasteShortcut is not ("ctrl+v" or "ctrl+shift+v" or "shift+insert"))

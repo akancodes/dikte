@@ -62,19 +62,19 @@ sealed class Overlay : Form
         Native.DwmSetWindowAttribute(Handle, 33, ref round, sizeof(int));
     }
 
-    public void ShowListening(Func<float> level)
+    public void ShowListening(Func<float> level, string title = "Listening", string hint = "Release to send · Space: hands-free · Esc")
     {
         _level = level;
         Array.Clear(_levels);
-        Set(OverlayMode.Listening, "Listening", "Release to send · Space: hands-free · Esc", TimeSpan.Zero);
+        Set(OverlayMode.Listening, title, hint, TimeSpan.Zero);
     }
 
     public void ShowHandsFree() => Set(OverlayMode.HandsFree, "Listening hands-free", "Hotkey to send · Esc to cancel", TimeSpan.Zero);
 
-    public void ShowWorking()
+    public void ShowWorking(string title = "Transcribing")
     {
         _level = null;
-        Set(OverlayMode.Working, "Transcribing", "Esc to cancel", TimeSpan.Zero);
+        Set(OverlayMode.Working, title, "Esc to cancel", TimeSpan.Zero);
     }
 
     public void ShowDone(string text)

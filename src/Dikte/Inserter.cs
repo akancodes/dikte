@@ -6,7 +6,7 @@ namespace Dikte;
 /// <summary>Puts text where the user is typing: the focused window of whatever app is in front.</summary>
 static class Inserter
 {
-    const ushort VK_SHIFT = 0x10, VK_CONTROL = 0x11, VK_INSERT = 0x2D, VK_V = 0x56;
+    const ushort VK_BACK = 0x08, VK_RETURN = 0x0D, VK_SHIFT = 0x10, VK_CONTROL = 0x11, VK_INSERT = 0x2D, VK_V = 0x56;
 
     static readonly int[] HeldModifiers =
     {
@@ -16,11 +16,66 @@ static class Inserter
 
     public static async Task InsertAsync(string text, Settings s)
     {
-        // Ctrl+V pressed while Win is still down is Win+Ctrl+V; wait for the hands to come off the hotkey.
-        for (int i = 0; i < 60 && HeldModifiers.Any(Native.IsPhysicallyDown); i++) await Task.Delay(25);
-
+        await HandsOffAsync();
         if (s.InsertMode == "type") Type(text);
         else await PasteAsync(text, s);
+    }
+
+    /// <summary>Ctrl+V pressed while Win is still down is Win+Ctrl+V; waits for the hands to come off the hotkey.</summary>
+    static async Task HandsOffAsync()
+    {
+        for (int i = 0; i < 60 && HeldModifiers.Any(Native.IsPhysicallyDown); i++) await Task.Delay(25);
+    }
+
+    /// <summary>
+    /// The text selected in the app in front, or null. Copies with Ctrl+Insert, not Ctrl+C: in a terminal with
+    /// nothing selected Ctrl+C would interrupt the running program. The clipboard is given back afterwards.
+    /// </summary>
+    public static async Task<string?> CopySelectionAsync()
+    {
+        await HandsOffAsync();
+        var saved = SavedClipboard.Take();
+        try
+        {
+            Clipboard.Clear();
+            Native.Send(Native.Key(VK_CONTROL, false), Native.Key(VK_INSERT, false), Native.Key(VK_INSERT, true), Native.Key(VK_CONTROL, true));
+            for (int i = 0; i < 20; i++)
+            {
+                await Task.Delay(25);
+                if (Clipboard.ContainsText()) return Clipboard.GetText();
+            }
+            return null;
+        }
+        catch (Exception e) when (e is System.Runtime.InteropServices.ExternalException or ThreadStateException)
+        {
+            Log.Write($"Copying the selection failed: {e.Message}");
+            return null;
+        }
+        finally
+        {
+            try
+            {
+                if (saved is not null) saved.Restore();
+                else Clipboard.Clear();
+            }
+            catch (System.Runtime.InteropServices.ExternalException) { }
+        }
+    }
+
+    /// <summary>"send": Enter after the text, once the app has taken the paste.</summary>
+    public static async Task PressEnterAsync()
+    {
+        await HandsOffAsync();
+        await Task.Delay(120);
+        Native.Send(Native.Key(VK_RETURN, false), Native.Key(VK_RETURN, true));
+    }
+
+    /// <summary>"delete that": Backspace once per character of the last dictation.</summary>
+    public static async Task DeleteBackAsync(int count)
+    {
+        await HandsOffAsync();
+        var inputs = Enumerable.Range(0, count).SelectMany(_ => new[] { Native.Key(VK_BACK, false), Native.Key(VK_BACK, true) });
+        foreach (var chunk in inputs.Chunk(200)) Native.Send(chunk);
     }
 
     static void Type(string text)
