@@ -185,7 +185,8 @@ details .adv label { font-size: 12.5px; color: var(--muted); display: grid; gap:
 .mode-item.active .dot { background: var(--violet); }
 .mode-edit { display: grid; gap: 14px; align-content: start; min-width: 0; }
 .mode-edit label.f { display: grid; gap: 6px; font-size: 12.5px; color: var(--muted); }
-.mode-edit textarea.field { min-height: 120px; font-size: 14px; line-height: 1.5; color: var(--text); }
+.mode-edit .field { color: var(--text); font-size: 14px; }
+.mode-edit textarea.field { min-height: 120px; line-height: 1.5; }
 .mode-edit .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .apps { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .app { display: inline-flex; align-items: center; gap: 6px; padding: 5px 6px 5px 11px; border-radius: 99px; background: var(--chip); font-size: 13px; font-weight: 550; }
@@ -234,13 +235,6 @@ details .adv label { font-size: 12.5px; color: var(--muted); display: grid; gap:
 
   <section class="view" id="settings">
     <div class="grid">
-      <div class="card">
-        <h3>Shortcuts</h3>
-        <p class="sub">Any key, key combination or mouse button. <b>Esc</b> cancels a recording.</p>
-        <div class="bind" id="bind-hotkey"></div>
-        <div class="bind" id="bind-toggleHotkey"></div>
-      </div>
-
       <div class="card" id="modesCard" style="grid-column:1/-1">
         <h3>Modes</h3>
         <p class="sub">How your words are written. Tell each mode what to do in your own words. A mode's own shortcut wins, then the app you are in, then the active mode.</p>
@@ -249,6 +243,13 @@ details .adv label { font-size: 12.5px; color: var(--muted); display: grid; gap:
           <div class="mode-edit" id="modeEdit"></div>
         </div>
         <div class="bind" id="bind-nextModeHotkey" style="margin-top:8px;border-top:1px solid var(--line)"></div>
+      </div>
+
+      <div class="card">
+        <h3>Shortcuts</h3>
+        <p class="sub">Any key, key combination or mouse button. <b>Esc</b> cancels a recording.</p>
+        <div class="bind" id="bind-hotkey"></div>
+        <div class="bind" id="bind-toggleHotkey"></div>
       </div>
 
       <div class="card">
