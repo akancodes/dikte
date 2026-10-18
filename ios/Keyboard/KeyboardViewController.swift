@@ -263,6 +263,10 @@ final class KeyboardModel: ObservableObject {
     /// The mic is held down: letting go sends.
     @Published private(set) var holding = false
     @Published private(set) var listeningSince = Date()
+    /// The modes and the active one, as the app last wrote them; nil until the app has run once.
+    @Published private(set) var modeMenu: ModeMenu?
+    /// The strip shows the modes to pick from instead of suggestions.
+    @Published var pickingMode = false
 
     weak var controller: KeyboardViewController?
     var layout: KeysView.Layout = .turkish
@@ -382,6 +386,7 @@ final class KeyboardModel: ObservableObject {
     // MARK: what the app says
 
     func refresh() {
+        modeMenu = SharedStore.read(ModeMenu.self, "modes")
         guard let state = SharedStore.read(LiveState.self, "state") else { return }
         sessionOn = state.phase != .off
         switch state.phase {
@@ -405,6 +410,20 @@ final class KeyboardModel: ObservableObject {
             }
         }
         insertIfAwaited()
+    }
+
+    var activeModeName: String {
+        guard let menu = modeMenu else { return "As spoken" }
+        return menu.items.first { $0.id == menu.active }?.name ?? "As spoken"
+    }
+
+    /// The app makes it the active mode now, or when it next starts listening.
+    func chooseMode(_ id: String) {
+        haptic.impactOccurred()
+        SharedStore.write(ModeChoice(id: id), "modeChoice")
+        Bridge.post(.mode)
+        modeMenu?.active = id
+        pickingMode = false
     }
 
     /// Types the newest dictation if this keyboard asked for it and has not typed it yet.

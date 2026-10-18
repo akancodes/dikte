@@ -92,6 +92,7 @@ final class Dictator: ObservableObject {
         signals.on(.start) { [weak self] in self?.start(from: .keyboard) }
         signals.on(.stop) { [weak self] in self?.stop() }
         signals.on(.cancel) { [weak self] in self?.cancel() }
+        signals.on(.mode) { [weak self] in self?.takeKeyboardMode() }
 
         let center = NotificationCenter.default
         center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
@@ -107,6 +108,8 @@ final class Dictator: ObservableObject {
         }
         publish()
         writeKeyboardPrefs()
+        takeKeyboardMode()
+        writeModeMenu()
     }
 
     private func writeKeyboardPrefs() {
@@ -194,6 +197,7 @@ final class Dictator: ObservableObject {
 
     func start(from source: Source) {
         guard phase != .listening else { return }
+        takeKeyboardMode()
         guard hasKey else {
             notice = "Add your OpenAI API key in Dikte's settings first."
             publish(message: notice)
@@ -253,11 +257,10 @@ final class Dictator: ObservableObject {
 
     private func transcribe(_ wav: Data, _ settings: Settings) async throws -> String {
         guard let key = KeyStore.get() else { throw ApiError("Add your OpenAI API key in Dikte's settings first.") }
-        var text = try await api.transcribe(wav: wav, settings: settings, apiKey: key)
-        if settings.cleanup, !text.isEmpty {
-            text = (try? await api.cleanup(text, settings: settings, apiKey: key)) ?? text
-        }
-        return text
+        let text = try await api.transcribe(wav: wav, settings: settings, apiKey: key)
+        // iOS does not tell a keyboard which app it types into, so the active mode is the only rule here.
+        guard let mode = Modes.find(settings, settings.activeMode), !text.isEmpty else { return text }
+        return (try? await api.rewrite(text, mode: mode, settings: settings, apiKey: key)) ?? text
     }
 
     private func deliver(_ text: String, seconds: Double, to source: Source) {
@@ -289,6 +292,25 @@ final class Dictator: ObservableObject {
         Bridge.post(.changed)
     }
 
+    // MARK: modes
+
+    /// What the keyboard's mode chip shows.
+    private func writeModeMenu() {
+        let menu = ModeMenu(active: settings.activeMode, items: settings.modes.map { .init(id: $0.id, name: $0.name) })
+        if SharedStore.read(ModeMenu.self, "modes") != menu {
+            SharedStore.write(menu, "modes")
+            Bridge.post(.changed)
+        }
+    }
+
+    /// A mode picked on the keyboard becomes the active mode (once: the choice is taken away).
+    private func takeKeyboardMode() {
+        guard let choice = SharedStore.read(ModeChoice.self, "modeChoice") else { return }
+        SharedStore.delete("modeChoice")
+        guard choice.id == Modes.plain || settings.modes.contains(where: { $0.id == choice.id }) else { return }
+        update { $0.activeMode = choice.id }
+    }
+
     // MARK: settings and the rest of the screen
 
     func update(_ change: (inout Settings) -> Void) {
@@ -297,6 +319,7 @@ final class Dictator: ObservableObject {
         guard next != settings else { return }
         settings = next
         try? next.save(Paths.settings)
+        writeModeMenu()
     }
 
     func saveKey(_ key: String) async -> String? {
