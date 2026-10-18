@@ -61,6 +61,23 @@ dictations and what you have spent, and holds every setting. Closing it leaves D
 | End with "send" or "gönder" as its own sentence | Presses Enter after the text: sends a prompt in Claude Code or a chat |
 | Say only "delete that" (or "sil") | Takes the last dictation back out |
 
+**Modes** (Windows, Mac and iPhone): how your words are written. Each mode is an instruction in your own words that a
+chat model applies to the transcript, never answering it. Five come built in and can be edited, deleted or added to:
+
+| Mode | Writes |
+|---|---|
+| As spoken | The words as heard, with no chat model (the default) |
+| Clean up | Your wording, tidied: no "um"s, "no wait" corrections applied |
+| Prompt | A clear prompt for Claude Code or another AI assistant: a short request stays a sentence, a long ramble is put in order |
+| List | A bullet list, one point per line |
+| Commit message | A git commit message in English |
+| Email | A short email in the language you spoke |
+
+Which one is used: a mode's own hold shortcut wins, then the app in front (Prompt is used in Windows Terminal, VS Code,
+Cursor, the Claude app, Terminal, iTerm2 and other terminals out of the box), then the active mode, picked on the
+window's Home page, from the tray or menu-bar menu, with the next-mode shortcut, or on iPhone from the keyboard's
+strip. Each mode can use its own chat model; the default `gpt-4.1-mini` answers in under a second.
+
 Both shortcuts are picked in Settings by pressing them: any key, key combination, or the middle and side mouse
 buttons (`Mouse 4` / `Mouse 5`, which then stop doing "back" and "forward"). A short hold that turns into a shortcut (`Ctrl + Win + →`, `Fn + F1`...) is cancelled silently and the shortcut
 works as usual. Mixing languages is fine: pick the ones you speak in Settings and the model is told to write each word
@@ -91,8 +108,10 @@ apply at once): `%APPDATA%\Dikte\` on Windows, `~/Library/Application Support/Di
 | `apiBase` | `https://api.openai.com/v1` | Any OpenAI-compatible server, e.g. `https://api.groq.com/openai/v1` with `whisper-large-v3-turbo` |
 | `insertMode` | `paste` | `paste` (clipboard + shortcut, the clipboard is restored) or `type` (key by key, leaves the clipboard alone) |
 | `pasteShortcut` | `ctrl+v` | Windows: `ctrl+shift+v` or `shift+insert` for terminals that want them (a Mac always uses `⌘V`) |
-| `cleanup` | `false` | Runs the text through `cleanupModel` to drop "um"s and apply "no wait" corrections (+~1 s) |
-| `cleanupModel` | `gpt-4.1-mini` | Also used to translate and to edit |
+| `modes` | Clean up, Prompt, List, Commit message, Email | How your words are written: `name`, `instruction` (your own words), `model` (empty = `cleanupModel`), `apps` it is always used in, its own hold `hotkey` |
+| `activeMode` | `plain` | The mode used when no shortcut or app picks one; `plain` writes the words as heard |
+| `nextModeHotkey` | `""` | Tap to switch the active mode |
+| `cleanupModel` | `gpt-4.1-mini` | Chat model for modes, translate and edit |
 | `appendSpace` | `true` | So two dictations in a row do not run together |
 | `microphone` | `""` | Empty = the system default |
 | `sounds` | `true` | |

@@ -215,7 +215,7 @@ struct ModeEditor: View {
             } header: {
                 Text("Model")
             } footer: {
-                Text("Empty uses the default. gpt-4.1 writes better prompts; gpt-4.1-mini is quicker.")
+                Text("Empty uses the default. gpt-4.1-mini answers in under a second; gpt-4.1 and gpt-5.6-luna write a little more smoothly and take longer.")
             }
             Section {
                 Button(d.settings.activeMode == id ? "Active mode" : "Make it the active mode") {

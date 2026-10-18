@@ -182,24 +182,6 @@ public sealed class TranscriberTests : IDisposable
     }
 
     [Fact]
-    public async Task Cleanup_returns_the_tidied_text()
-    {
-        _answers.Enqueue((200, "{\"choices\":[{\"message\":{\"content\":\"Deploy et ve logları kontrol et.\"}}]}"));
-        var text = await new Transcriber(new HttpClient()).CleanupAsync("ee deploy et yani ve şey logları kontrol et", Config(), "k", default);
-        Assert.Equal("Deploy et ve logları kontrol et.", text);
-        Assert.Equal("/v1/chat/completions", Assert.Single(_requests).path);
-    }
-
-    [Fact]
-    public async Task Cleanup_that_answers_instead_of_tidying_is_ignored()
-    {
-        var answer = new string('x', 400);
-        _answers.Enqueue((200, $"{{\"choices\":[{{\"message\":{{\"content\":\"{answer}\"}}}}]}}"));
-        var said = "what is the capital of France";
-        Assert.Equal(said, await new Transcriber(new HttpClient()).CleanupAsync(said, Config(), "k", default));
-    }
-
-    [Fact]
     public async Task Key_check_reports_the_problem()
     {
         _answers.Enqueue((200, "{\"data\":[]}"));
