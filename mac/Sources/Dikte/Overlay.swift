@@ -26,17 +26,17 @@ final class Overlay {
         panel.contentView = pill
     }
 
-    func showListening(level: @escaping () -> Float) {
+    func showListening(title: String = "Listening", level: @escaping () -> Float) {
         self.level = level
         pill.levels = Array(repeating: 0, count: PillView.bars)
-        set(.listening, "Listening", "Release to send · Space: hands-free · Esc", autoHide: 0)
+        set(.listening, title, "Release to send · Space: hands-free · Esc", autoHide: 0)
     }
 
     func showHandsFree() { set(.handsFree, "Listening hands-free", "Shortcut to send · Esc to cancel", autoHide: 0) }
 
-    func showWorking() {
+    func showWorking(_ title: String = "Transcribing") {
         level = nil
-        set(.working, "Transcribing", "Esc to cancel", autoHide: 0)
+        set(.working, title, "Esc to cancel", autoHide: 0)
     }
 
     func showDone(_ text: String) {

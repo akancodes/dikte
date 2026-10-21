@@ -23,8 +23,14 @@ public struct Settings: Codable, Equatable {
     public var restoreClipboard = true
     /// Add a space after the text, so consecutive dictations do not run together.
     public var appendSpace = true
-    /// Send the transcript through a chat model that removes filler words and applies corrections.
+    /// Before 0.7 the only mode: read once to pick the first activeMode, then unused.
     public var cleanup = false
+    /// The ways of writing what was said; see Mode.
+    public var modes = Modes.defaults()
+    /// The mode used when no shortcut or app picks one: a mode id, or "plain" for the words as heard.
+    public var activeMode = Modes.plain
+    /// Tap to switch the active mode to the next one. Empty: none.
+    public var nextModeHotkey = ""
     public var cleanupModel = "gpt-4.1-mini"
     /// Input device name as macOS lists it; empty uses the system default.
     public var microphone = ""
@@ -58,6 +64,12 @@ public struct Settings: Codable, Equatable {
         restoreClipboard = try value(.restoreClipboard, d.restoreClipboard)
         appendSpace = try value(.appendSpace, d.appendSpace)
         cleanup = try value(.cleanup, d.cleanup)
+        modes = try value(.modes, d.modes)
+        nextModeHotkey = try value(.nextModeHotkey, d.nextModeHotkey)
+        // A file from before modes: the old clean-up switch picks the first active mode.
+        activeMode = try c.decodeIfPresent(String.self, forKey: .activeMode)
+            ?? (cleanup && modes.contains { $0.id == "clean" } ? "clean" : Modes.plain)
+        normalize()
         cleanupModel = try value(.cleanupModel, d.cleanupModel)
         microphone = try value(.microphone, d.microphone)
         sounds = try value(.sounds, d.sounds)
@@ -66,6 +78,23 @@ public struct Settings: Codable, Equatable {
         maxMinutes = try value(.maxMinutes, d.maxMinutes)
         historySize = try value(.historySize, d.historySize)
         autoUpdate = try value(.autoUpdate, d.autoUpdate)
+    }
+
+    /// Tidies what a hand-edited file may hold: spaces, missing ids, an active mode that no longer exists.
+    mutating func normalize() {
+        for i in modes.indices {
+            modes[i].name = modes[i].name.trimmingCharacters(in: .whitespacesAndNewlines)
+            modes[i].instruction = modes[i].instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+            modes[i].model = modes[i].model.trimmingCharacters(in: .whitespaces)
+            modes[i].hotkey = modes[i].hotkey.trimmingCharacters(in: .whitespaces)
+            var seen = Set<String>()
+            modes[i].apps = modes[i].apps.map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
+            if modes[i].id.trimmingCharacters(in: .whitespaces).isEmpty {
+                modes[i].id = Modes.newId(modes[i].name, taken: modes.map(\.id))
+            }
+        }
+        if activeMode != Modes.plain && !modes.contains(where: { $0.id == activeMode }) { activeMode = Modes.plain }
     }
 
     /// Reads the file, or writes the defaults when it does not exist yet. Comments and trailing commas are fine.
@@ -120,10 +149,20 @@ public struct Settings: Codable, Equatable {
     /// Throws ConfigError with a message fit for the user.
     public func validate() throws {
         _ = try HotkeySpec.parse(hotkey)
-        if !toggleHotkey.trimmingCharacters(in: .whitespaces).isEmpty {
-            _ = try HotkeySpec.parse(toggleHotkey)
-            func plain(_ s: String) -> String { s.replacingOccurrences(of: " ", with: "").lowercased() }
-            if plain(toggleHotkey) == plain(hotkey) { throw ConfigError("The tap shortcut must differ from the hold shortcut.") }
+        func plain(_ s: String) -> String { s.replacingOccurrences(of: " ", with: "").lowercased() }
+        var ids = Set<String>()
+        for m in modes {
+            if m.id == Modes.plain { throw ConfigError("\"\(Modes.plain)\" cannot be a mode's id.") }
+            if !ids.insert(m.id).inserted { throw ConfigError("Two modes share the id \"\(m.id)\".") }
+            if m.name.isEmpty { throw ConfigError("Every mode needs a name.") }
+            if m.instruction.isEmpty { throw ConfigError("Tell the \(m.name) mode what to do with your words.") }
+        }
+        var taken = [plain(hotkey): "Hold to talk"]
+        let shortcuts = [(toggleHotkey, "Tap to talk"), (nextModeHotkey, "Next mode")] + modes.map { ($0.hotkey, "Talk in \($0.name)") }
+        for (shortcut, name) in shortcuts where !shortcut.trimmingCharacters(in: .whitespaces).isEmpty {
+            _ = try HotkeySpec.parse(shortcut)
+            if let other = taken[plain(shortcut)] { throw ConfigError("\(name) and \(other) cannot share a shortcut.") }
+            taken[plain(shortcut)] = name
         }
         if KeyNames.parse(handsFreeKey) == nil { throw ConfigError("Unknown handsFreeKey \"\(handsFreeKey)\".") }
         if !["paste", "type"].contains(insertMode) { throw ConfigError("insertMode must be \"paste\" or \"type\".") }

@@ -52,6 +52,34 @@ dictations and what you have spent, and holds every setting. Closing it leaves D
 | `Esc` | Cancels the recording, or the transcript still on its way |
 | Left-click the tray icon (Mac: the menu-bar icon's menu) | Starts/stops hands-free dictation with the mouse |
 
+**Voice tools** (Windows; each needs a shortcut set in Settings first):
+
+| Do this | And |
+|---|---|
+| Hold the translate shortcut and talk in any language | It is written in English (or `translateTo`) |
+| Select text, hold the edit shortcut, say "shorter" / "more formal" / "fix the grammar" | The selection is replaced by the edited text; with nothing selected it writes what you ask for |
+| Tap the paste-again shortcut | Pastes your last dictation again, where you are now |
+| Say "new line" / "new paragraph" (Turkish: "yeni satır" / "yeni paragraf") | A line break instead of the words |
+| End with "send" or "gönder" as its own sentence | Presses Enter after the text: sends a prompt in Claude Code or a chat |
+| Say only "delete that" (or "sil") | Takes the last dictation back out |
+
+**Modes** (Windows, Mac and iPhone): how your words are written. Each mode is an instruction in your own words that a
+chat model applies to the transcript, never answering it. Five come built in and can be edited, deleted or added to:
+
+| Mode | Writes |
+|---|---|
+| As spoken | The words as heard, with no chat model (the default) |
+| Clean up | Your wording, tidied: no "um"s, "no wait" corrections applied |
+| Prompt | A clear prompt for Claude Code or another AI assistant: a short request stays a sentence, a long ramble is put in order |
+| List | A bullet list, one point per line |
+| Commit message | A git commit message in English |
+| Email | A short email in the language you spoke |
+
+Which one is used: a mode's own hold shortcut wins, then the app in front (Prompt is used in Windows Terminal, VS Code,
+Cursor, the Claude app, Terminal, iTerm2 and other terminals out of the box), then the active mode, picked on the
+window's Home page, from the tray or menu-bar menu, with the next-mode shortcut, or on iPhone from the keyboard's
+strip. Each mode can use its own chat model; the default `gpt-4.1-mini` answers in under a second.
+
 Both shortcuts are picked in Settings by pressing them: any key, key combination, or the middle and side mouse
 buttons (`Mouse 4` / `Mouse 5`, which then stop doing "back" and "forward"). A short hold that turns into a shortcut (`Ctrl + Win + →`, `Fn + F1`...) is cancelled silently and the shortcut
 works as usual. Mixing languages is fine: pick the ones you speak in Settings and the model is told to write each word
@@ -71,14 +99,21 @@ apply at once): `%APPDATA%\Dikte\` on Windows, `~/Library/Application Support/Di
 | `hotkey` | `ctrl+win`, Mac `fn` | Hold to talk. Any combination: `rctrl`, `f8`, `mouse4`, `ctrl+shift+space`; on a Mac also `rcmd`, `ctrl+opt`... |
 | `toggleHotkey` | `""` | Tap to start hands-free, tap again to send; `mouse5`, `f9`... |
 | `handsFreeKey` | `space` | Pressed while holding the hotkey |
+| `translateHotkey` | `""` | Windows: hold to talk in any language, written in `translateTo` |
+| `translateTo` | `English` | |
+| `editHotkey` | `""` | Windows: hold to say what to do with the selected text |
+| `repasteHotkey` | `""` | Windows: tap to paste the last dictation again |
+| `voiceCommands` | `true` | Windows: "new line", "send" at the end, "delete that" alone act instead of being written |
 | `model` | `gpt-transcribe` | Also `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1` |
 | `languages` | `[]` | Codes of the languages you speak: none = detect, one = pinned, several = mixed freely |
 | `vocabulary` | `Claude Code, ...` | Names and terms to spell your way, sent as the model's prompt |
 | `apiBase` | `https://api.openai.com/v1` | Any OpenAI-compatible server, e.g. `https://api.groq.com/openai/v1` with `whisper-large-v3-turbo` |
 | `insertMode` | `paste` | `paste` (clipboard + shortcut, the clipboard is restored) or `type` (key by key, leaves the clipboard alone) |
 | `pasteShortcut` | `ctrl+v` | Windows: `ctrl+shift+v` or `shift+insert` for terminals that want them (a Mac always uses `⌘V`) |
-| `cleanup` | `false` | Runs the text through `cleanupModel` to drop "um"s and apply "no wait" corrections (+~1 s) |
-| `cleanupModel` | `gpt-4.1-mini` | |
+| `modes` | Clean up, Prompt, List, Commit message, Email | How your words are written: `name`, `instruction` (your own words), `model` (empty = `cleanupModel`), `apps` it is always used in, its own hold `hotkey` |
+| `activeMode` | `plain` | The mode used when no shortcut or app picks one; `plain` writes the words as heard |
+| `nextModeHotkey` | `""` | Tap to switch the active mode |
+| `cleanupModel` | `gpt-4.1-mini` | Chat model for modes, translate and edit |
 | `appendSpace` | `true` | So two dictations in a row do not run together |
 | `microphone` | `""` | Empty = the system default |
 | `sounds` | `true` | |

@@ -15,6 +15,7 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 keySection
+                modesSection
                 languageSection
                 Section {
                     TextField("Names and terms", text: $vocabulary, axis: .vertical)
@@ -28,13 +29,6 @@ struct SettingsView: View {
                 Section("Speech") {
                     Picker("Model", selection: binding(\.model)) {
                         ForEach(modelChoices, id: \.self) { Text($0) }
-                    }
-                    Toggle(isOn: binding(\.cleanup)) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Tidy up")
-                            Text("Drops um and uh, keeps only the correction after \"no wait\". A second, small model call.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
                     }
                     Toggle("Add a space after the text", isOn: binding(\.appendSpace))
                 }
@@ -139,6 +133,44 @@ struct SettingsView: View {
         }
     }
 
+    private var modesSection: some View {
+        Section {
+            Picker("Active mode", selection: binding(\.activeMode)) {
+                Text("As spoken").tag(Modes.plain)
+                ForEach(d.settings.modes, id: \.id) { Text($0.name).tag($0.id) }
+            }
+            ForEach(d.settings.modes, id: \.id) { mode in
+                NavigationLink {
+                    ModeEditor(id: mode.id)
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(mode.name)
+                        Text(mode.instruction).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+            }
+            .onDelete { offsets in
+                d.update { s in
+                    let gone = offsets.map { s.modes[$0].id }
+                    s.modes.remove(atOffsets: offsets)
+                    if gone.contains(s.activeMode) { s.activeMode = Modes.plain }
+                }
+            }
+            Button {
+                d.update { s in
+                    let id = Modes.newId("New mode", taken: s.modes.map(\.id))
+                    s.modes.append(Mode(id: id, name: "New mode", instruction: "Write it as…"))
+                }
+            } label: {
+                Label("New mode", systemImage: "plus")
+            }
+        } header: {
+            Text("Modes")
+        } footer: {
+            Text("How your words are written: each mode is an instruction in your own words, sent with the transcript to a chat model. Switch modes from the keyboard's strip too.")
+        }
+    }
+
     private var modelChoices: [String] {
         Self.models.contains(d.settings.model) ? Self.models : Self.models + [d.settings.model]
     }
@@ -150,5 +182,67 @@ struct SettingsView: View {
     private var version: String {
         let info = Bundle.main.infoDictionary
         return "\(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))"
+    }
+}
+
+/// One mode: its name, what to do with the words, and its chat model.
+struct ModeEditor: View {
+    @EnvironmentObject private var d: Dictator
+    let id: String
+    @State private var name = ""
+    @State private var instruction = ""
+    @State private var model = ""
+
+    var body: some View {
+        Form {
+            Section("Name") {
+                TextField("Name", text: $name)
+                    .onChange(of: name) { _, v in save { $0.name = v.trimmingCharacters(in: .whitespaces) } }
+            }
+            Section {
+                TextField("Write it as a short list…", text: $instruction, axis: .vertical)
+                    .lineLimit(4...12)
+                    .onChange(of: instruction) { _, v in save { $0.instruction = v.trimmingCharacters(in: .whitespacesAndNewlines) } }
+            } header: {
+                Text("What to do with your words")
+            } footer: {
+                Text("Plain words are enough: \"make it a list\", \"turn it into a clear prompt\". The transcript is never answered, only rewritten.")
+            }
+            Section {
+                TextField("Default (\(d.settings.cleanupModel))", text: $model)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .onChange(of: model) { _, v in save { $0.model = v.trimmingCharacters(in: .whitespaces) } }
+            } header: {
+                Text("Model")
+            } footer: {
+                Text("Empty uses the default. gpt-4.1-mini answers in under a second; gpt-4.1 and gpt-5.6-luna write a little more smoothly and take longer.")
+            }
+            Section {
+                Button(d.settings.activeMode == id ? "Active mode" : "Make it the active mode") {
+                    d.update { $0.activeMode = id }
+                }
+                .disabled(d.settings.activeMode == id)
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(Palette.background.ignoresSafeArea())
+        .navigationTitle(name.isEmpty ? "Mode" : name)
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            guard let mode = d.settings.modes.first(where: { $0.id == id }) else { return }
+            name = mode.name
+            instruction = mode.instruction
+            model = mode.model
+        }
+    }
+
+    /// Empty names and instructions are not saved: a mode always has both.
+    private func save(_ change: @escaping (inout Mode) -> Void) {
+        d.update { s in
+            guard let i = s.modes.firstIndex(where: { $0.id == id }) else { return }
+            var m = s.modes[i]
+            change(&m)
+            if !m.name.isEmpty && !m.instruction.isEmpty { s.modes[i] = m }
+        }
     }
 }

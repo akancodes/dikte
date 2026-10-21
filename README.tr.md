@@ -42,6 +42,26 @@ sonra macOS imzasız uygulamanın Erişilebilirlik iznini unutur: Dikte'yi liste
 | `Esc` | Kaydı ya da yoldaki yazıyı iptal eder |
 | Tepsi simgesine sol tık (Mac: menü çubuğu simgesinin menüsü) | Eller serbest dikteyi fareyle başlatır/bitirir |
 
+**Ses araçları** (Windows; her biri için önce Ayarlar'da bir kısayol seç):
+
+| Ne yaparsan | Ne olur |
+|---|---|
+| Çeviri kısayolunu basılı tutup herhangi bir dilde konuş | İngilizce yazılır |
+| Metni seç, düzenleme kısayolunu basılı tut, "kısalt" / "daha resmi yap" de | Seçili metin düzenlenmiş haliyle değişir; seçim yoksa istediğini yazar |
+| Tekrar yapıştır kısayoluna dokun | Son dikteyi bulunduğun yere tekrar yapıştırır |
+| "Yeni satır" / "yeni paragraf" de | Kelimeler yerine satır atlar |
+| Sonunda ayrı bir cümle olarak "gönder" de | Metinden sonra Enter'a basar: Claude Code'da prompt'u gönderir |
+| Sadece "sil" de | Son dikteyi geri siler |
+
+**Modlar** (Windows, Mac ve iPhone): sözlerinin nasıl yazılacağı. Her mod kendi cümlelerinle yazdığın bir talimattır;
+bir sohbet modeli onu konuşmana uygular, konuşmanı asla cevaplamaz. Beş tanesi hazır gelir, düzenlenir, silinir, yenisi eklenir:
+Olduğu gibi (modelsiz, varsayılan), Clean up (temizle), Prompt (Claude Code için düzgün bir prompt), List (madde listesi),
+Commit message, Email.
+
+Hangisinin kullanılacağı: modun kendi kısayolu önce gelir, sonra öndeki uygulama (Prompt; Windows Terminal, VS Code,
+Cursor, Claude uygulaması, Terminal, iTerm2 gibi yerlerde kendiliğinden devrede), sonra aktif mod. Aktif modu pencerenin
+ana sayfasından, tepsi/menü çubuğu menüsünden, sonraki mod kısayoluyla ya da iPhone'da klavyenin üst şeridinden seçersin.
+
 Türkçe ve İngilizceyi cümle içinde karıştırabilirsin; `language` boş kalsın. Ayarlar, gizlilik ve derleme için
 [İngilizce README](README.md).
 

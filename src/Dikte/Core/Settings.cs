@@ -14,6 +14,20 @@ public sealed class Settings
     /// <summary>Pressed while holding the hotkey: keeps listening hands-free until the hotkey is pressed again.</summary>
     public string HandsFreeKey { get; set; } = "space";
 
+    /// <summary>Hold to dictate in <see cref="TranslateTo"/> whatever language is spoken. Empty: none.</summary>
+    public string TranslateHotkey { get; set; } = "";
+
+    /// <summary>Hold, say what to do with the selected text ("make it shorter"), let go: the selection is replaced.</summary>
+    public string EditHotkey { get; set; } = "";
+
+    /// <summary>Tap to paste the last dictation again. Empty: none.</summary>
+    public string RepasteHotkey { get; set; } = "";
+
+    public string TranslateTo { get; set; } = "English";
+
+    /// <summary>"new line", "send" at the end, "delete that" alone (and their Turkish twins) act instead of being written.</summary>
+    public bool VoiceCommands { get; set; } = true;
+
     /// <summary>Any OpenAI-compatible server: https://api.openai.com/v1, https://api.groq.com/openai/v1, a local whisper server...</summary>
     public string ApiBase { get; set; } = "https://api.openai.com/v1";
 
@@ -41,8 +55,17 @@ public sealed class Settings
     /// <summary>Add a space after the text, so consecutive dictations do not run together.</summary>
     public bool AppendSpace { get; set; } = true;
 
-    /// <summary>Send the transcript through a chat model that removes filler words and fixes punctuation.</summary>
+    /// <summary>Before 0.7 the only mode: read once to pick the first <see cref="ActiveMode"/>, then unused.</summary>
     public bool Cleanup { get; set; } = false;
+
+    /// <summary>The ways of writing what was said; see <see cref="Mode"/>.</summary>
+    public List<Mode> Modes { get; set; } = Core.Modes.Defaults();
+
+    /// <summary>The mode used when no shortcut or app picks one: a mode id, or "plain" for the words as heard.</summary>
+    public string? ActiveMode { get; set; }
+
+    /// <summary>Tap to switch the active mode to the next one. Empty: none.</summary>
+    public string NextModeHotkey { get; set; } = "";
 
     public string CleanupModel { get; set; } = "gpt-4.1-mini";
 
@@ -79,10 +102,12 @@ public sealed class Settings
         if (!File.Exists(path))
         {
             var fresh = new Settings();
+            fresh.Normalize();
             fresh.Save(path);
             return fresh;
         }
         var settings = JsonSerializer.Deserialize<Settings>(File.ReadAllText(path), Json) ?? new Settings();
+        settings.Normalize();
         settings.Validate();
         return settings;
     }
@@ -93,16 +118,50 @@ public sealed class Settings
         File.WriteAllText(path, JsonSerializer.Serialize(this, Json));
     }
 
+    /// <summary>
+    /// Fills in what an older or hand-edited file leaves out: the first active mode comes from the old
+    /// clean-up switch, and an active mode that no longer exists falls back to the words as heard.
+    /// </summary>
+    public void Normalize()
+    {
+        Modes ??= new();
+        foreach (var m in Modes)
+        {
+            m.Apps ??= new();
+            m.Name = m.Name?.Trim() ?? "";
+            m.Instruction = m.Instruction?.Trim() ?? "";
+            m.Model = m.Model?.Trim() ?? "";
+            m.Hotkey = m.Hotkey?.Trim() ?? "";
+            m.Apps = m.Apps.Select(a => a.Trim()).Where(a => a.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (string.IsNullOrWhiteSpace(m.Id)) m.Id = Core.Modes.NewId(m.Name, Modes.Select(x => x.Id));
+        }
+        ActiveMode ??= Cleanup && Modes.Any(m => m.Id == "clean") ? "clean" : Core.Modes.Plain;
+        if (ActiveMode != Core.Modes.Plain && Modes.All(m => m.Id != ActiveMode)) ActiveMode = Core.Modes.Plain;
+    }
+
     /// <summary>Throws FormatException with a message fit for the user.</summary>
     public void Validate()
     {
         HotkeySpec.Parse(Hotkey);
-        if (!string.IsNullOrWhiteSpace(ToggleHotkey))
+        var taken = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { [Hotkey.Replace(" ", "")] = "Hold to talk" };
+        var ids = new HashSet<string>();
+        foreach (var m in Modes)
         {
-            HotkeySpec.Parse(ToggleHotkey);
-            if (string.Equals(ToggleHotkey.Replace(" ", ""), Hotkey.Replace(" ", ""), StringComparison.OrdinalIgnoreCase))
-                throw new FormatException("The tap shortcut must differ from the hold shortcut.");
+            if (m.Id == Core.Modes.Plain) throw new FormatException($"\"{Core.Modes.Plain}\" cannot be a mode's id.");
+            if (!ids.Add(m.Id)) throw new FormatException($"Two modes share the id \"{m.Id}\".");
+            if (m.Name.Length == 0) throw new FormatException("Every mode needs a name.");
+            if (m.Instruction.Length == 0) throw new FormatException($"Tell the {m.Name} mode what to do with your words.");
         }
+        var shortcuts = new List<(string, string)> { (ToggleHotkey, "Tap to talk"), (TranslateHotkey, $"Write in {TranslateTo}"), (EditHotkey, "Edit the selection"), (RepasteHotkey, "Paste again"), (NextModeHotkey, "Next mode") };
+        shortcuts.AddRange(Modes.Select(m => (m.Hotkey, $"Talk in {m.Name}")));
+        foreach (var (shortcut, name) in shortcuts)
+        {
+            if (string.IsNullOrWhiteSpace(shortcut)) continue;
+            HotkeySpec.Parse(shortcut);
+            if (!taken.TryAdd(shortcut.Replace(" ", ""), name))
+                throw new FormatException($"{name} and {taken[shortcut.Replace(" ", "")]} cannot share a shortcut.");
+        }
+        if (string.IsNullOrWhiteSpace(TranslateTo)) throw new FormatException("translateTo is empty.");
         if (!KeyNames.TryParse(HandsFreeKey, out _)) throw new FormatException($"Unknown handsFreeKey \"{HandsFreeKey}\".");
         if (InsertMode is not ("paste" or "type")) throw new FormatException("insertMode must be \"paste\" or \"type\".");
         if (PasteShortcut is not ("ctrl+v" or "ctrl+shift+v" or "shift+insert"))

@@ -25,8 +25,8 @@ sealed class TrayApp : ApplicationContext
     readonly System.Windows.Forms.Timer _updateTimer = new() { Interval = 4 * 60 * 60 * 1000 };
 
     Settings _settings;
-    HotkeyMachine _machine;
-    ToggleKey? _toggle;
+    HoldKeys _holds;
+    ToggleKey? _toggle, _repaste, _nextMode;
     KeyboardHook? _hook;
     MouseHook? _mouseHook;
     KeyCapture? _capture;
@@ -39,6 +39,11 @@ sealed class TrayApp : ApplicationContext
     Recorder? _recorder;
     Recorder? _micTest;
     DateTime _recordingStarted;
+    DictationMode _mode;
+    Mode? _writeMode;
+    Mode? _failedMode;
+    string? _lastText;
+    DateTime _lastTextAt;
     bool _feedbackShown;
     int _pending;
     CancellationTokenSource _cancel = new();
@@ -56,8 +61,10 @@ sealed class TrayApp : ApplicationContext
         _ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         _api = new Transcriber(_http);
         _settings = LoadSettings(out var problem);
-        _machine = NewMachine(_settings);
-        _toggle = NewToggle(_settings);
+        _holds = NewHolds(_settings);
+        _toggle = NewTap(_settings.ToggleHotkey);
+        _repaste = NewTap(_settings.RepasteHotkey);
+        _nextMode = NewTap(_settings.NextModeHotkey);
         _history = new History(Paths.History, _settings.HistorySize);
 
         _idleIcon = TrayIcons.Load("idle");
@@ -115,24 +122,38 @@ sealed class TrayApp : ApplicationContext
         {
             problem = e.Message;
             Log.Write($"Settings unusable, using defaults: {e.Message}");
-            return new Settings();
+            var defaults = new Settings();
+            defaults.Normalize();
+            return defaults;
         }
     }
 
-    static HotkeyMachine NewMachine(Settings s)
+    static HoldKeys NewHolds(Settings s)
     {
         KeyNames.TryParse(s.HandsFreeKey, out var lockVk);
-        return new HotkeyMachine(HotkeySpec.Parse(s.Hotkey), lockVk);
+        var keys = new List<(HoldTarget, HotkeySpec)> { (DictationMode.Dictate, HotkeySpec.Parse(s.Hotkey)) };
+        if (!string.IsNullOrWhiteSpace(s.TranslateHotkey)) keys.Add((DictationMode.Translate, HotkeySpec.Parse(s.TranslateHotkey)));
+        if (!string.IsNullOrWhiteSpace(s.EditHotkey)) keys.Add((DictationMode.Edit, HotkeySpec.Parse(s.EditHotkey)));
+        foreach (var m in s.Modes.Where(m => m.Hotkey.Length > 0))
+            keys.Add((new HoldTarget(DictationMode.Dictate, m.Id), HotkeySpec.Parse(m.Hotkey)));
+        return new HoldKeys(keys, lockVk);
     }
 
-    static ToggleKey? NewToggle(Settings s) =>
-        string.IsNullOrWhiteSpace(s.ToggleHotkey) ? null : new ToggleKey(HotkeySpec.Parse(s.ToggleHotkey));
+    /// <summary>Every hold shortcut in one string, to tell whether the set changed.</summary>
+    static string HoldShortcuts(Settings s) =>
+        string.Join("|", new[] { s.Hotkey, s.HandsFreeKey, s.TranslateHotkey, s.EditHotkey }.Concat(s.Modes.Select(m => m.Id + "=" + m.Hotkey)));
+
+    static ToggleKey? NewTap(string shortcut) =>
+        string.IsNullOrWhiteSpace(shortcut) ? null : new ToggleKey(HotkeySpec.Parse(shortcut));
+
+    static IEnumerable<string> Shortcuts(Settings s) =>
+        new[] { s.Hotkey, s.ToggleHotkey, s.TranslateHotkey, s.EditHotkey, s.RepasteHotkey, s.NextModeHotkey }
+            .Concat(s.Modes.Select(m => m.Hotkey)).Where(x => !string.IsNullOrWhiteSpace(x));
 
     /// <summary>The mouse hook sees every mouse move, so it runs only while a shortcut (or a capture) needs it.</summary>
     void UpdateMouseHook()
     {
-        bool needed = _capture is not null || HotkeySpec.Parse(_settings.Hotkey).UsesMouse
-            || (!string.IsNullOrWhiteSpace(_settings.ToggleHotkey) && HotkeySpec.Parse(_settings.ToggleHotkey).UsesMouse);
+        bool needed = _capture is not null || Shortcuts(_settings).Any(x => HotkeySpec.Parse(x).UsesMouse);
         if (needed && _mouseHook is null)
         {
             try { _mouseHook = new MouseHook(OnKey); }
@@ -147,13 +168,17 @@ sealed class TrayApp : ApplicationContext
 
     void Apply(Settings fresh)
     {
-        bool hotkeyChanged = fresh.Hotkey != _settings.Hotkey || fresh.HandsFreeKey != _settings.HandsFreeKey;
+        bool hotkeyChanged = HoldShortcuts(fresh) != HoldShortcuts(_settings);
         bool toggleChanged = fresh.ToggleHotkey != _settings.ToggleHotkey;
+        bool repasteChanged = fresh.RepasteHotkey != _settings.RepasteHotkey;
+        bool nextModeChanged = fresh.NextModeHotkey != _settings.NextModeHotkey;
         bool updatesTurnedOn = fresh.AutoUpdate && !_settings.AutoUpdate;
         _settings = fresh;
         if (updatesTurnedOn) _ = CheckForUpdatesAsync(manual: false);
-        if (hotkeyChanged && _recorder is null) _machine = NewMachine(fresh);
-        if (toggleChanged) _toggle = NewToggle(fresh);
+        if (hotkeyChanged && _recorder is null) _holds = NewHolds(fresh);
+        if (toggleChanged) _toggle = NewTap(fresh.ToggleHotkey);
+        if (repasteChanged) _repaste = NewTap(fresh.RepasteHotkey);
+        if (nextModeChanged) _nextMode = NewTap(fresh.NextModeHotkey);
         UpdateMouseHook();
         _history = new History(Paths.History, fresh.HistorySize);
         PushState();
@@ -178,18 +203,19 @@ sealed class TrayApp : ApplicationContext
     }
 
     /// <summary>Merges a partial settings object from the window, checks it, saves it.</summary>
-    void SaveFromWindow(JsonElement patch)
+    void SaveFromWindow(JsonElement patch, bool quiet = false)
     {
         try
         {
             var node = JsonSerializer.SerializeToNode(_settings, Settings.Json)!.AsObject();
             foreach (var prop in patch.EnumerateObject()) node[prop.Name] = JsonNode.Parse(prop.Value.GetRawText());
             var fresh = node.Deserialize<Settings>(Settings.Json)!;
+            fresh.Normalize();
             fresh.Validate();
             _lastReload = DateTime.Now; // our own write: no "reloaded" toast
             fresh.Save(Paths.Settings);
             Apply(fresh);
-            _window?.Post(new { type = "toast", text = "Saved" });
+            if (!quiet) _window?.Post(new { type = "toast", text = "Saved" });
         }
         catch (Exception e) when (e is FormatException or JsonException or IOException or InvalidOperationException)
         {
@@ -217,6 +243,22 @@ sealed class TrayApp : ApplicationContext
             return true; // nothing reaches the apps while a shortcut is being picked
         }
 
+        if (_repaste is not null)
+        {
+            var r = _repaste.Feed(vk, isDown);
+            if (r.SuppressMenu) Native.Send(Native.Key(Native.VK_MENU_MASK, false), Native.Key(Native.VK_MENU_MASK, true));
+            if (r.Command == HotkeyCommand.Toggle) _ui.Post(_ => _ = RepasteAsync(), null);
+            if (r.Swallow) return true;
+        }
+
+        if (_nextMode is not null)
+        {
+            var n = _nextMode.Feed(vk, isDown);
+            if (n.SuppressMenu) Native.Send(Native.Key(Native.VK_MENU_MASK, false), Native.Key(Native.VK_MENU_MASK, true));
+            if (n.Command == HotkeyCommand.Toggle) _ui.Post(_ => SetActiveMode(Modes.Next(_settings), announce: true), null);
+            if (n.Swallow) return true;
+        }
+
         if (_toggle is not null)
         {
             var t = _toggle.Feed(vk, isDown);
@@ -226,27 +268,26 @@ sealed class TrayApp : ApplicationContext
         }
 
         // Esc while a transcript is on its way cancels it, and must not reach the app (it would interrupt Claude Code).
-        if (vk == HotkeyMachine.VkEscape && isDown && !_machine.IsRecording && _pending > 0)
+        if (vk == HotkeyMachine.VkEscape && isDown && !_holds.IsRecording && _pending > 0)
         {
             _ui.Post(_ => CancelPending(), null);
             return true;
         }
 
-        var result = _machine.Feed(vk, isDown);
+        var result = _holds.Feed(vk, isDown);
         if (result.SuppressMenu) Native.Send(Native.Key(Native.VK_MENU_MASK, false), Native.Key(Native.VK_MENU_MASK, true));
-        if (result.Command != HotkeyCommand.None)
-        {
-            var command = result.Command;
-            _ui.Post(_ => Run(command), null); // never do slow work inside the hook
-        }
+        foreach (var (command, target) in result.Commands)
+            _ui.Post(_ => Run(command, target), null); // never do slow work inside the hook
         return result.Swallow;
     }
 
     void OnWatch()
     {
-        var command = _machine.Resync(Native.IsPhysicallyDown);
-        if (command != HotkeyCommand.None) Run(command);
+        var command = _holds.Resync(Native.IsPhysicallyDown);
+        if (command != HotkeyCommand.None) Run(command, _mode);
         _toggle?.Resync(Native.IsPhysicallyDown);
+        _repaste?.Resync(Native.IsPhysicallyDown);
+        _nextMode?.Resync(Native.IsPhysicallyDown);
         if (_capture is not null && DateTime.Now - _captureStarted > TimeSpan.FromSeconds(12)) FinishCapture(CaptureOutcome.Cancelled, null);
         if (_recorder is not null || _pending > 0 || _capture is not null || _micTest is not null) _lastUse = DateTime.Now;
         else if (_staged is not null && DateTime.Now - _lastUse > TimeSpan.FromMinutes(1) && _window?.ContainsFocus != true) InstallUpdate();
@@ -258,16 +299,33 @@ sealed class TrayApp : ApplicationContext
         {
             _feedbackShown = true;
             var recorder = _recorder;
-            _overlay.ShowListening(() => recorder.Level);
-            if (_machine.IsLocked) _overlay.ShowHandsFree();
+            ShowListening(recorder);
+            if (_holds.IsLocked) _overlay.ShowHandsFree();
             if (_settings.Sounds) Sounds.Start();
             if (_settings.QuietOtherAudio) _ducker.Duck(_settings.QuietLevel);
             PushState();
         }
         if (_recorder.Duration.TotalMinutes >= _settings.MaxMinutes)
         {
-            _machine.Reset();
+            _holds.Reset();
             _ = StopAndSendAsync();
+        }
+    }
+
+    void ShowListening(Recorder recorder)
+    {
+        switch (_mode)
+        {
+            case DictationMode.Translate:
+                _overlay.ShowListening(() => recorder.Level, $"Listening · writing {_settings.TranslateTo}");
+                break;
+            case DictationMode.Edit:
+                _overlay.ShowListening(() => recorder.Level, "Say what to change", "Release to apply to the selection · Esc");
+                break;
+            default:
+                if (_writeMode is { } m) _overlay.ShowListening(() => recorder.Level, $"Listening · {m.Name}");
+                else _overlay.ShowListening(() => recorder.Level);
+                break;
         }
     }
 
@@ -276,16 +334,16 @@ sealed class TrayApp : ApplicationContext
         if (_window is { Visible: true } && _recorder is not null && _feedbackShown) _window.Post(new { type = "level", v = _recorder.Level });
     }
 
-    void Run(HotkeyCommand command)
+    void Run(HotkeyCommand command, HoldTarget target)
     {
         switch (command)
         {
-            case HotkeyCommand.Start: StartRecording(); break;
+            case HotkeyCommand.Start: StartRecording(target); break;
             case HotkeyCommand.Lock:
                 if (_recorder is not null)
                 {
                     var recorder = _recorder;
-                    _overlay.ShowListening(() => recorder.Level);
+                    ShowListening(recorder);
                     _overlay.ShowHandsFree();
                     if (!_feedbackShown && _settings.QuietOtherAudio) _ducker.Duck(_settings.QuietLevel);
                     _feedbackShown = true;
@@ -301,24 +359,27 @@ sealed class TrayApp : ApplicationContext
     {
         if (_recorder is null)
         {
-            _machine.EnterLocked();
-            StartRecording();
+            _holds.EnterLocked();
+            StartRecording(DictationMode.Dictate);
         }
         else
         {
-            _machine.Reset();
+            _holds.Reset();
             _ = StopAndSendAsync();
         }
     }
 
     // ---- Recording ------------------------------------------------------------------------------
 
-    void StartRecording()
+    void StartRecording(HoldTarget target)
     {
         if (_recorder is not null) return;
         StopMicTest();
         try
         {
+            _mode = target.Kind;
+            // Picked now, while the app being typed into is still the one in front.
+            _writeMode = target.Kind == DictationMode.Dictate ? Modes.Resolve(_settings, target.ModeId, Native.ForegroundApp()) : null;
             _recorder = new Recorder(_settings.Microphone);
             _recorder.Start();
             _recordingStarted = DateTime.Now;
@@ -331,7 +392,7 @@ sealed class TrayApp : ApplicationContext
         {
             _recorder?.Dispose();
             _recorder = null;
-            _machine.Reset();
+            _holds.Reset();
             Log.Write($"Microphone failed: {e}");
             Fail("Microphone not available", e.Message);
         }
@@ -362,6 +423,8 @@ sealed class TrayApp : ApplicationContext
         var recorder = _recorder;
         _recorder = null;
         if (recorder is null) return;
+        var mode = _mode;
+        var writeMode = _writeMode;
         EndRecording();
         bool wasShown = _feedbackShown;
         byte[] wav;
@@ -398,12 +461,12 @@ sealed class TrayApp : ApplicationContext
             return;
         }
         if (_settings.Sounds) Sounds.Stop();
-        await ProcessAsync(wav, length);
+        await ProcessAsync(wav, length, mode, writeMode);
     }
 
     // ---- Transcribing ---------------------------------------------------------------------------
 
-    async Task ProcessAsync(byte[] wav, TimeSpan length)
+    async Task ProcessAsync(byte[] wav, TimeSpan length, DictationMode mode = DictationMode.Dictate, Mode? writeMode = null)
     {
         var key = KeyStore.Get();
         if (key is null)
@@ -423,42 +486,85 @@ sealed class TrayApp : ApplicationContext
 
         _pending++;
         UpdateIcon();
-        if (_recorder is null) _overlay.ShowWorking();
+        if (_recorder is null)
+            _overlay.ShowWorking(mode switch { DictationMode.Translate => "Translating", DictationMode.Edit => "Editing", _ => writeMode is null ? "Transcribing" : $"Writing · {writeMode.Name}" });
         PushState();
         var clock = Stopwatch.StartNew();
         try
         {
-            var text = await _api.TranscribeAsync(wav, settings, key, ct);
+            bool ownWindow = _window is not null && Native.GetForegroundWindow() == _window.Handle;
+            // Copied first, while the selection is surely still the one the user meant.
+            string? selection = mode == DictationMode.Edit && !ownWindow ? await Inserter.CopySelectionAsync() : null;
+
+            var heard = await _api.TranscribeAsync(wav, settings, key, ct);
             var transcribeMs = clock.ElapsedMilliseconds;
-            if (settings.Cleanup && text.Length > 0)
+            var spoken = mode != DictationMode.Edit && settings.VoiceCommands ? VoiceCommands.Apply(heard) : new Spoken(heard, false, false);
+            var text = spoken.Text;
+            if (text.Trim().Length > 0)
             {
-                try { text = await _api.CleanupAsync(text, settings, key, ct); }
-                catch (ApiException e) { Log.Write($"Clean-up skipped: {e.Message}"); }
+                switch (mode)
+                {
+                    case DictationMode.Edit:
+                        text = await _api.EditAsync(selection ?? "", text, settings, key, ct);
+                        break;
+                    case DictationMode.Translate:
+                        try { text = await _api.TranslateAsync(text, settings, key, ct); }
+                        catch (ApiException e) { Log.Write($"Translation skipped, writing the words as spoken: {e.Message}"); }
+                        break;
+                    default:
+                        if (writeMode is not null)
+                        {
+                            try { text = await _api.RewriteAsync(text, writeMode, settings, key, ct); }
+                            catch (ApiException e) { Log.Write($"{writeMode.Name} skipped, writing the words as heard: {e.Message}"); }
+                        }
+                        break;
+                }
             }
             await previous;
-            Log.Write($"Transcribed {length.TotalSeconds:0.0}s in {transcribeMs} ms (total {clock.ElapsedMilliseconds} ms), {text.Length} chars");
+            Log.Write($"{(writeMode is null ? mode.ToString() : $"{mode} ({writeMode.Id})")} {length.TotalSeconds:0.0}s: transcribed in {transcribeMs} ms (total {clock.ElapsedMilliseconds} ms), {text.Length} chars" +
+                      (spoken.PressEnter ? ", then Enter" : "") + (spoken.DeleteLast ? ", delete last" : "") +
+                      (mode == DictationMode.Edit ? $", selection {selection?.Length ?? 0} chars" : ""));
 
-            if (text.Length == 0)
+            if (spoken.DeleteLast)
+            {
+                await DeleteLastAsync();
+                return;
+            }
+            if (text.Trim().Length == 0 && !spoken.PressEnter)
             {
                 if (_recorder is null) _overlay.ShowMessage("Nothing to write", "No words were heard", 2);
                 return;
             }
             int words = CountWords(text);
-            _history.Add(text);
-            _stats.Record(DateTime.Now, words, length.TotalSeconds, settings.Model);
+            if (words > 0)
+            {
+                _history.Add(text);
+                _stats.Record(DateTime.Now, words, length.TotalSeconds, settings.Model);
+            }
             _failedAudio = null;
+            _failedMode = null;
 
-            if (_window is not null && Native.GetForegroundWindow() == _window.Handle)
+            if (ownWindow)
             {
                 // Dictated with Dikte's own window in front: show it there instead of pasting into the page.
-                _window.Post(new { type = "result", text });
+                if (words > 0) _window!.Post(new { type = "result", text });
                 _overlay.HideNow();
             }
             else
             {
-                if (settings.AppendSpace && !char.IsWhiteSpace(text[^1])) text += " ";
-                await Inserter.InsertAsync(text, settings);
-                if (_recorder is null) _overlay.ShowDone($"{words} words");
+                if (words > 0)
+                {
+                    // No trailing space before Enter, nor after an edit (it replaces exactly what was selected).
+                    if (settings.AppendSpace && !spoken.PressEnter && mode != DictationMode.Edit && !char.IsWhiteSpace(text[^1])) text += " ";
+                    await Inserter.InsertAsync(text, settings);
+                    _lastText = text;
+                    _lastTextAt = DateTime.Now;
+                }
+                if (spoken.PressEnter) await Inserter.PressEnterAsync();
+                if (_recorder is null)
+                    _overlay.ShowDone(words == 0 ? "Sent"
+                        : mode == DictationMode.Edit ? (string.IsNullOrEmpty(selection) ? "Written" : "Edited")
+                        : spoken.PressEnter ? $"{words} words · sent" : $"{words} words");
             }
         }
         catch (OperationCanceledException)
@@ -468,6 +574,7 @@ sealed class TrayApp : ApplicationContext
         catch (ApiException e)
         {
             _failedAudio = wav;
+            _failedMode = writeMode;
             try { File.WriteAllBytes(Paths.FailedAudio, wav); } catch (IOException) { }
             Log.Write($"Transcription failed: {e.Message}");
             Fail(e.Message, "The recording is kept: Retry from the tray menu");
@@ -475,6 +582,7 @@ sealed class TrayApp : ApplicationContext
         catch (Exception e)
         {
             _failedAudio = wav;
+            _failedMode = writeMode;
             Log.Write($"Unexpected failure: {e}");
             Fail("Something went wrong", e.Message);
         }
@@ -485,6 +593,35 @@ sealed class TrayApp : ApplicationContext
             UpdateIcon();
             PushState();
         }
+    }
+
+    /// <summary>"delete that": takes the last dictation back out, if it went in a few minutes ago.</summary>
+    async Task DeleteLastAsync()
+    {
+        var last = _lastText;
+        if (last is null || DateTime.Now - _lastTextAt > TimeSpan.FromMinutes(10))
+        {
+            if (_recorder is null) _overlay.ShowMessage("Nothing to delete", "Only the last dictation can be taken back", 2);
+            return;
+        }
+        _lastText = null;
+        await Inserter.DeleteBackAsync(last.Length);
+        if (_recorder is null) _overlay.ShowDone("Deleted");
+    }
+
+    /// <summary>The paste-again shortcut: the last dictation, into whatever is in front now.</summary>
+    async Task RepasteAsync()
+    {
+        var text = _history.Items.Count > 0 ? _history.Items[0].Text : null;
+        if (text is null)
+        {
+            _overlay.ShowMessage("Nothing to paste yet", "", 2);
+            return;
+        }
+        if (_settings.AppendSpace && !char.IsWhiteSpace(text[^1])) text += " ";
+        await Inserter.InsertAsync(text, _settings);
+        _lastText = text;
+        _lastTextAt = DateTime.Now;
     }
 
     void CancelPending()
@@ -511,7 +648,9 @@ sealed class TrayApp : ApplicationContext
 
     void StartCapture(string target)
     {
-        if (_recorder is not null || target is not ("hotkey" or "toggleHotkey")) return;
+        bool known = target is "hotkey" or "toggleHotkey" or "translateHotkey" or "editHotkey" or "repasteHotkey" or "nextModeHotkey"
+            || (target.StartsWith("mode:", StringComparison.Ordinal) && _settings.Modes.Any(m => m.Id == target[5..]));
+        if (_recorder is not null || !known) return;
         _capture = new KeyCapture();
         _captureTarget = target;
         _captureStarted = DateTime.Now;
@@ -528,7 +667,9 @@ sealed class TrayApp : ApplicationContext
         if (outcome == CaptureOutcome.Done && target is not null && result is not null)
         {
             Log.Write($"Shortcut picked for {target}: {result}");
-            SaveFromWindow(JsonSerializer.SerializeToElement(new Dictionary<string, string> { [target] = result }));
+            SaveFromWindow(target.StartsWith("mode:", StringComparison.Ordinal)
+                ? ModesPatch(_settings, target[5..], m => m.Hotkey = result)
+                : JsonSerializer.SerializeToElement(new Dictionary<string, string> { [target] = result }));
             return;
         }
         if (outcome == CaptureOutcome.Unusable) _window?.Post(new { type = "toast", text = "That key cannot be a shortcut. Try another." });
@@ -571,7 +712,60 @@ sealed class TrayApp : ApplicationContext
             case "openLog": Open(Paths.Log); break;
             case "openSettingsFile": Open(Paths.Settings); break;
             case "checkUpdates": _ = CheckForUpdatesAsync(manual: true); break;
+            case "setMode": SetActiveMode(m.GetProperty("id").GetString() ?? Modes.Plain, announce: false); break;
+            case "listApps": _window?.Post(new { type = "apps", apps = OpenApps() }); break;
         }
+    }
+
+    // ---- Modes ----------------------------------------------------------------------------------
+
+    /// <summary>The menu, the window and the next-mode shortcut all switch the active mode through here.</summary>
+    void SetActiveMode(string id, bool announce)
+    {
+        if (id != Modes.Plain && _settings.Modes.All(m => m.Id != id)) return;
+        if (id != _settings.ActiveMode)
+        {
+            SaveFromWindow(JsonSerializer.SerializeToElement(new { activeMode = id }, Settings.Json), quiet: true);
+            Log.Write($"Active mode: {id}");
+        }
+        if (announce && _recorder is null)
+            _overlay.ShowMessage($"Mode: {Modes.NameOf(_settings, id)}", ActiveModeHint(), 1.8);
+    }
+
+    /// <summary>Says when an app rule will still pick another mode, so a switch that seems ignored is explained.</summary>
+    string ActiveModeHint()
+    {
+        var app = Native.ForegroundApp();
+        var byApp = app is null ? null : _settings.Modes.FirstOrDefault(m => m.Apps.Any(a => Modes.Normalize(a) == Modes.Normalize(app)));
+        return byApp is null ? "" : $"{byApp.Name} is still used in {app}";
+    }
+
+    /// <summary>A save patch that changes one mode and keeps the rest of the list.</summary>
+    static JsonElement ModesPatch(Settings s, string id, Action<Mode> change)
+    {
+        var modes = JsonSerializer.Deserialize<List<Mode>>(JsonSerializer.Serialize(s.Modes, Settings.Json), Settings.Json)!;
+        var mode = modes.FirstOrDefault(m => m.Id == id);
+        if (mode is not null) change(mode);
+        return JsonSerializer.SerializeToElement(new { modes }, Settings.Json);
+    }
+
+    /// <summary>Apps with a window, by process name, for picking which ones a mode is used in.</summary>
+    static IReadOnlyList<string> OpenApps()
+    {
+        var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in Process.GetProcesses())
+        {
+            using (p)
+            {
+                try
+                {
+                    if (p.MainWindowHandle != IntPtr.Zero && p.ProcessName is not ("Dikte" or "ApplicationFrameHost" or "TextInputHost" or "SystemSettings"))
+                        names.Add(p.ProcessName);
+                }
+                catch (InvalidOperationException) { }
+            }
+        }
+        return names.ToList();
     }
 
     async Task SetKeyAsync(string key)
@@ -598,7 +792,7 @@ sealed class TrayApp : ApplicationContext
         var key = KeyStore.Get();
         var stats = _stats.Summary(DateTime.Now);
         string status =
-            _recorder is not null && _feedbackShown ? (_machine.IsLocked ? "handsfree" : "listening")
+            _recorder is not null && _feedbackShown ? (_holds.IsLocked ? "handsfree" : "listening")
             : _pending > 0 ? "working"
             : _errorMessage is not null ? "error"
             : "idle";
@@ -623,6 +817,7 @@ sealed class TrayApp : ApplicationContext
                 stats,
                 autostart = Autostart.Enabled,
                 capture = _captureTarget,
+                codingApps = Modes.CodingApps,
                 update = new { version = Updater.CurrentText, status = _updateStatus, busy = _updating },
             },
         });
@@ -734,6 +929,13 @@ sealed class TrayApp : ApplicationContext
         open.Font = new Font(open.Font, FontStyle.Bold);
         menu.Items.Add(open);
         menu.Items.Add(_recorder is null ? "Start hands-free dictation" : "Stop and send", null, (_, _) => ToggleDictation());
+        var modes = new ToolStripMenuItem($"Mode: {Modes.NameOf(_settings, _settings.ActiveMode)}");
+        foreach (var (id, name) in new[] { (Modes.Plain, Modes.NameOf(_settings, Modes.Plain)) }.Concat(_settings.Modes.Select(m => (m.Id, m.Name))))
+        {
+            var item = new ToolStripMenuItem(name, null, (_, _) => SetActiveMode(id, announce: false)) { Checked = id == _settings.ActiveMode };
+            modes.DropDownItems.Add(item);
+        }
+        menu.Items.Add(modes);
         if (_failedAudio is not null) menu.Items.Add("Retry last recording", null, (_, _) => RetryFailed());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_staged is not null ? "Restart to update" : "Check for updates", null, (_, _) =>
@@ -749,7 +951,7 @@ sealed class TrayApp : ApplicationContext
         var wav = _failedAudio;
         if (wav is null) return;
         _errorMessage = _errorHint = null;
-        _ = ProcessAsync(wav, TimeSpan.FromSeconds((wav.Length - 44) / (Recorder.SampleRate * 2.0)));
+        _ = ProcessAsync(wav, TimeSpan.FromSeconds((wav.Length - 44) / (Recorder.SampleRate * 2.0)), DictationMode.Dictate, _failedMode);
     }
 
     static void Open(string path)
