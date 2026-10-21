@@ -36,8 +36,10 @@ with `gpt-transcribe` an hour of talking costs about **$0.27**.
 4. Click into any text field and **hold `Fn` (🌐)**, speak, release. If the 🌐 key also opens emoji or switches the
    keyboard language, set **System Settings → Keyboard → Press 🌐 key to → Do Nothing**; Dikte's window says so too.
 
-After an update, macOS forgets the Accessibility permission of an unsigned app: remove Dikte from the list with **−**
-and turn it on again.
+Dikte updates itself on both systems: every 4 hours it looks for a newer GitHub release, checks the download's
+SHA-256 and installs it once you have not dictated for a minute (**Auto update** in Settings turns this off).
+After each update on a Mac, macOS forgets the Accessibility permission of an unsigned app: remove Dikte from the list
+with **−** and turn it on again.
 
 The window (open it from the tray icon or by starting `Dikte.exe` again) shows what it is doing, your recent
 dictations and what you have spent, and holds every setting. Closing it leaves Dikte running in the tray.
@@ -118,6 +120,7 @@ apply at once): `%APPDATA%\Dikte\` on Windows, `~/Library/Application Support/Di
 | `quietOtherAudio` | `true` | Turn other sounds down while recording (put back afterwards) |
 | `quietLevel` | `0.15` | What they are turned down to: `0` mutes |
 | `maxMinutes` | `10` | A recording stops and sends itself at this length |
+| `autoUpdate` | `true` | Installs new releases from GitHub by itself, after a minute without dictating |
 
 ## Privacy
 

@@ -40,6 +40,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var captureTarget: String?
     private var captureStarted = Date()
 
+    private let updater = Updater()
+    private var lastUse = Date()
+    private var staged: URL?
+    private var updating = false
+    private var updateStatus = ""
+
     // MARK: start and stop
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -78,11 +84,29 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
         Log.write("Started \(version) on macOS \(ProcessInfo.processInfo.operatingSystemVersionString), hotkey \(settings.hotkey), model \(settings.model)")
+        // An update starts the new app with --updated-from, and --background when the window was closed.
+        let arguments = CommandLine.arguments
+        let updatedFrom = arguments.firstIndex(of: "--updated-from").flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
+        let quiet = launchedAtLogin || arguments.contains("--background")
         if let problem { overlay.showMessage("Settings file has a problem", problem, seconds: 8) }
+        else if let updatedFrom { overlay.showMessage("Dikte updated to \(version)", "From \(updatedFrom)", seconds: 3) }
 
         Permissions.requestMicrophone()
-        if !launchedAtLogin || KeyStore.get() == nil || tap == nil { openWindow() }
-        else { overlay.showMessage("Dikte is ready", "Hold \(AppController.pretty(settings.hotkey)) to talk", seconds: 2.5) }
+        // After an update the tap is usually off: macOS ties Accessibility to the exact build.
+        if !quiet || KeyStore.get() == nil || tap == nil { openWindow() }
+        else if problem == nil && updatedFrom == nil { overlay.showMessage("Dikte is ready", "Hold \(AppController.pretty(settings.hotkey)) to talk", seconds: 2.5) }
+
+        let firstCheck = Timer(timeInterval: 45, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                if self?.staged == nil && self?.updating == false { Updater.cleanUp() }
+                await self?.checkForUpdates(manual: false)
+            }
+        }
+        RunLoop.main.add(firstCheck, forMode: .common)
+        let everyFourHours = Timer(timeInterval: 4 * 60 * 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.checkForUpdates(manual: false) }
+        }
+        RunLoop.main.add(everyFourHours, forMode: .common)
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -173,7 +197,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let hotkeyChanged = AppController.holdShortcuts(fresh) != AppController.holdShortcuts(settings)
         let toggleChanged = fresh.toggleHotkey != settings.toggleHotkey
         let nextModeChanged = fresh.nextModeHotkey != settings.nextModeHotkey
+        let updatesTurnedOn = fresh.autoUpdate && !settings.autoUpdate
         settings = fresh
+        if updatesTurnedOn { Task { await checkForUpdates(manual: false) } }
         if hotkeyChanged && recorder == nil { router.setHolds(AppController.holds(fresh)) }
         if toggleChanged { router.setToggle(AppController.tap(fresh.toggleHotkey)) }
         if nextModeChanged { router.setNextMode(AppController.tap(fresh.nextModeHotkey)) }
@@ -269,6 +295,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let command = router.resync(EventTap.isPhysicallyDown)
         if command != .none { run(command) }
         if captureTarget != nil && Date().timeIntervalSince(captureStarted) > 12 { finishCapture(.cancelled, nil) }
+        if recorder != nil || pending > 0 || captureTarget != nil || micTest != nil { lastUse = Date() }
+        else if staged != nil && Date().timeIntervalSince(lastUse) > 60 && window?.isFrontmost != true { installUpdate() }
 
         guard let recorder else { return }
         // Show, sound and quieten only once a hold is clearly meant, so fn+F1 stays silent.
@@ -584,6 +612,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case "openPermission": Permissions.open(m["which"] as? String ?? "")
         case "openLog": AppController.openInTextEdit(Paths.log)
         case "openSettingsFile": AppController.openInTextEdit(Paths.settings)
+        case "checkUpdates": Task { await checkForUpdates(manual: true) }
         case "setMode": setActiveMode(m["id"] as? String ?? Modes.plain, announce: false)
         case "listApps": window?.post(["type": "apps", "apps": AppController.openApps()])
         default: break
@@ -665,6 +694,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             "codingApps": Modes.codingApps,
             "permissions": ["accessibility": tap != nil, "microphone": Permissions.microphone] as [String: Any],
             "globeHint": usesFn && Permissions.globeKeyBusy,
+            "update": ["version": Updater.currentText, "status": updateStatus, "busy": updating] as [String: Any],
         ]
         window.post(["type": "state", "state": state])
     }
@@ -731,6 +761,53 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         _ = test.stop()
     }
 
+    // MARK: updates
+
+    /// Finds and downloads a newer release; onWatch installs it once Dikte has been idle a minute.
+    private func checkForUpdates(manual: Bool) async {
+        if updating || staged != nil || (!manual && !settings.autoUpdate) { return }
+        if let problem = Updater.installProblem {
+            updateStatus = problem
+            if manual { window?.post(["type": "toast", "text": problem]) }
+            pushState()
+            return
+        }
+        updating = true
+        updateStatus = "Checking…"
+        pushState()
+        defer {
+            updating = false
+            pushState()
+        }
+        do {
+            guard let release = try await updater.check() else {
+                updateStatus = "Up to date"
+                if manual { window?.post(["type": "toast", "text": "Dikte is up to date"]) }
+                return
+            }
+            updateStatus = "Downloading \(release.version)…"
+            pushState()
+            staged = try await updater.download(release)
+            updateStatus = "\(release.version) installs when you stop dictating"
+            Log.write("Update \(release.version) downloaded and verified.")
+        } catch {
+            updateStatus = "Could not check for updates"
+            Log.write("Update check failed: \(error.localizedDescription)")
+            if manual { window?.post(["type": "toast", "text": updateStatus]) }
+        }
+    }
+
+    private func installUpdate() {
+        guard let app = staged, recorder == nil, pending == 0 else { return }
+        staged = nil
+        if Updater.installAndRestart(app, openWindow: window?.window.isVisible == true) {
+            NSApp.terminate(nil)
+            return
+        }
+        updateStatus = "The update could not be installed"
+        pushState()
+    }
+
     // MARK: menu
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -749,6 +826,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(modes)
         if failedAudio != nil { menu.addItem(item("Retry last recording", #selector(menuRetry))) }
         menu.addItem(.separator())
+        menu.addItem(item(staged != nil ? "Restart to update" : "Check for updates", #selector(menuUpdate)))
         menu.addItem(item("Quit Dikte", #selector(menuQuit), key: "q"))
     }
 
@@ -762,6 +840,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func menuToggle() { toggleDictation() }
     @objc private func menuQuit() { NSApp.terminate(nil) }
     @objc private func menuMode(_ sender: NSMenuItem) { setActiveMode(sender.representedObject as? String ?? Modes.plain, announce: false) }
+
+    @objc private func menuUpdate() {
+        if staged != nil { installUpdate() } else { Task { await checkForUpdates(manual: true) } }
+    }
 
     @objc private func menuRetry() {
         guard let wav = failedAudio else { return }
