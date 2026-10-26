@@ -9,7 +9,8 @@ namespace Dikte;
 /// <summary>
 /// One meeting being recorded: your microphone and the call app's sound as two streams, each cut at its pauses
 /// and transcribed while the meeting goes on, so the notes can be written moments after it ends. Which stream a
-/// line came from says who spoke. The transcript so far is saved every few seconds; audio stays in memory.
+/// line came from says who spoke. The transcript so far is saved every few seconds. Audio stays in memory; a piece
+/// the API refuses goes to the pending folder, where "Write the notes again" picks it up.
 /// </summary>
 sealed class MeetingRecorder : IDisposable
 {
@@ -26,10 +27,13 @@ sealed class MeetingRecorder : IDisposable
     readonly System.Threading.Timer _saver;
     readonly object _gate = new();
     readonly List<MeetingLine> _lines = new();
-    readonly List<(Utterance Piece, bool Mine)> _failed = new();
     double _sentSeconds, _theirsAt = -1;
+    double _micAnchor;
+    long _micSamples = -1;
+    int _kept;
     bool _dirty;
-    volatile bool _finishing;
+    volatile bool _finishing, _discarding;
+    volatile string? _halted; // why nothing more is sent to the API: the rest goes straight to the pending folder
 
     /// <summary>The call app ("Discord"), or empty when only the microphone listens (a meeting in the room).</summary>
     public string App { get; }
@@ -38,7 +42,7 @@ sealed class MeetingRecorder : IDisposable
     public string With { get; set; }
     /// <summary>The notes file, written while recording.</summary>
     public string FilePath { get; }
-    /// <summary>Something that does not stop the meeting but leaves a side unheard.</summary>
+    /// <summary>Something that does not stop the meeting but leaves a side unheard or untranscribed.</summary>
     public string? Problem { get; private set; }
     /// <summary>A line was added, or a problem appeared. Raised on a worker thread.</summary>
     public event Action? Changed;
@@ -58,11 +62,7 @@ sealed class MeetingRecorder : IDisposable
             BufferMilliseconds = 100,
             NumberOfBuffers = 4,
         };
-        _mic.DataAvailable += (_, e) =>
-        {
-            double at = Elapsed.TotalSeconds - e.BytesRecorded / (Segmenter.SampleRate * 2.0);
-            foreach (var piece in _mine.Feed(e.Buffer.AsSpan(0, e.BytesRecorded), at)) Enqueue(piece, mine: true);
-        };
+        _mic.DataAvailable += (_, e) => OnMic(e.Buffer.AsSpan(0, e.BytesRecorded));
         _mic.RecordingStopped += (_, e) =>
         {
             if (e.Exception is not null && !_finishing) Report($"The microphone stopped: {e.Exception.Message}");
@@ -125,7 +125,23 @@ sealed class MeetingRecorder : IDisposable
     /// <summary>The latest lines, for the window.</summary>
     public IReadOnlyList<TranscriptLine> Recent(int count) => Doc("recording").Lines.TakeLast(count).ToList();
 
-    public int LineCount { get { lock (_gate) return _lines.Count; } }
+    /// <summary>
+    /// The microphone's clock is the audio itself: samples counted from its first buffer. When the callbacks run more
+    /// than a second ahead of that, the sound card dropped audio, and the count starts again from now.
+    /// </summary>
+    void OnMic(ReadOnlySpan<byte> pcm)
+    {
+        double byCallback = Elapsed.TotalSeconds - pcm.Length / (Segmenter.SampleRate * 2.0);
+        double bySamples = _micAnchor + _micSamples / (double)Segmenter.SampleRate;
+        if (_micSamples < 0 || byCallback - bySamples > 1.0)
+        {
+            _micAnchor = byCallback;
+            _micSamples = 0;
+            bySamples = byCallback;
+        }
+        _micSamples += pcm.Length / 2;
+        foreach (var piece in _mine.Feed(pcm, bySamples)) Enqueue(piece, mine: true);
+    }
 
     void Enqueue(Utterance piece, bool mine) => _queue.Writer.TryWrite((piece, mine));
 
@@ -140,25 +156,29 @@ sealed class MeetingRecorder : IDisposable
     {
         await foreach (var (piece, mine) in _queue.Reader.ReadAllAsync())
         {
-            if (_cancel.IsCancellationRequested) continue;
+            if (_discarding) continue;
             try
             {
-                var text = await TranscribeAsync(piece);
+                var text = _halted is null ? await TranscribeAsync(piece) : null;
                 lock (_gate)
                 {
-                    _sentSeconds += piece.Seconds;
-                    if (text is null) _failed.Add((piece, mine));
-                    else if (!MeetingNotes.IsNoise(text)) _lines.Add(new MeetingLine(piece.Start, piece.End, mine, text));
+                    if (text is not null) _sentSeconds += piece.Seconds;
+                    if (text is not null && !MeetingNotes.IsNoise(text)) _lines.Add(new MeetingLine(piece.Start, piece.End, mine, text));
                     _dirty = true;
                 }
+                if (text is null) Keep(piece, mine);
                 Changed?.Invoke();
             }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException)
+            {
+                // Quitting mid-meeting: kept for later. Discarding: dropped.
+                if (!_discarding) Keep(piece, mine);
+            }
             catch (Exception e) { Log.Write($"Meeting piece failed: {e}"); }
         }
     }
 
-    /// <summary>The text, or null when the API kept refusing: the piece is then kept for "Write notes again".</summary>
+    /// <summary>The text, or null when the API would not take it.</summary>
     async Task<string?> TranscribeAsync(Utterance piece)
     {
         var wav = Wav.FromPcm16(piece.Pcm, Segmenter.SampleRate, 1);
@@ -169,17 +189,48 @@ sealed class MeetingRecorder : IDisposable
                 var key = KeyStore.Get() ?? throw new ApiException("No OpenAI key is set.");
                 return await _api.TranscribeAsync(wav, _settings(), key, _cancel.Token, Context());
             }
+            catch (ApiException e) when (e.Status == 400)
+            {
+                // This piece only (too short, unreadable): asking again gets the same answer.
+                Log.Write($"Meeting piece at {piece.Start:0.0}s refused: {e.Message}");
+                return "";
+            }
             catch (ApiException e)
             {
-                // While the meeting goes on there is time to wait out a dropped connection; at the end there is not.
-                if (attempt >= (_finishing ? 2 : 4))
+                // A refused key or an empty account will not mend in a few seconds; a dropped connection may, while
+                // the meeting goes on. At the end there is no time to wait: the rest is kept for "Write the notes again".
+                if (!e.Transient || _finishing)
+                {
+                    if (_halted is null) Halt(e.Message);
+                    return null;
+                }
+                if (attempt >= 4)
                 {
                     Log.Write($"Meeting piece at {piece.Start:0.0}s not transcribed: {e.Message}");
                     return null;
                 }
-                await Task.Delay(TimeSpan.FromSeconds(_finishing ? 1 : 2 * attempt * attempt), _cancel.Token);
+                await Task.Delay(TimeSpan.FromSeconds(2 * attempt * attempt), _cancel.Token);
             }
         }
+    }
+
+    void Halt(string reason)
+    {
+        _halted = reason;
+        Report($"Transcribing stopped: {reason} What is said is kept; write the notes again once that is fixed.");
+    }
+
+    /// <summary>A piece not transcribed: into the pending folder as a WAV, named by when and whose it is.</summary>
+    void Keep(Utterance piece, bool mine)
+    {
+        try
+        {
+            var dir = MeetingWriter.PendingDir(FilePath);
+            Directory.CreateDirectory(dir);
+            File.WriteAllBytes(Path.Combine(dir, MeetingWriter.PendingName(piece.Start, mine)), Wav.FromPcm16(piece.Pcm, Segmenter.SampleRate, 1));
+            Interlocked.Increment(ref _kept);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log.Write($"Meeting piece not kept: {e.Message}"); }
     }
 
     /// <summary>The last words said, so a piece reads on from them.</summary>
@@ -205,6 +256,7 @@ sealed class MeetingRecorder : IDisposable
             Me = me,
             With = With.Trim(),
             Status = status,
+            Pending = _kept,
             Lines = lines.Select(l => new TranscriptLine(l.Start, l.Mine ? me : them, l.Text)).ToList(),
         };
     }
@@ -226,37 +278,63 @@ sealed class MeetingRecorder : IDisposable
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log.Write($"Meeting file not saved: {e.Message}"); }
     }
 
-    /// <summary>
-    /// Stops listening and waits for the last pieces to be transcribed. Returns the meeting and the pieces the API
-    /// refused; with <paramref name="discard"/> nothing more is sent and the file is deleted.
-    /// </summary>
-    public async Task<(MeetingDoc Doc, List<(Utterance Piece, bool Mine)> Failed)?> StopAsync(bool discard)
+    /// <summary>Stops the microphone and the app's sound, and cuts what was still being said into the queue.</summary>
+    async Task StopListeningAsync()
     {
         _finishing = true;
         _saver.Change(Timeout.Infinite, Timeout.Infinite);
-        if (discard) _cancel.Cancel();
-        _mic.StopRecording();
-        await Task.WhenAny(_micStopped.Task, Task.Delay(2000));
+        try { _mic.StopRecording(); } catch (Exception e) when (e is InvalidOperationException or NAudio.MmException) { }
+        await Task.WhenAny(_micStopped.Task, Task.Delay(2000)).ConfigureAwait(false);
         _app?.Dispose();
         _app = null;
-        if (!discard)
-        {
-            foreach (var piece in _mine.Flush()) Enqueue(piece, mine: true);
-            foreach (var piece in _theirs.Flush()) Enqueue(piece, mine: false);
-        }
+        foreach (var piece in _mine.Flush()) Enqueue(piece, mine: true);
+        foreach (var piece in _theirs.Flush()) Enqueue(piece, mine: false);
         _queue.Writer.TryComplete();
+    }
+
+    /// <summary>
+    /// Stops listening and waits for the last pieces to be transcribed; returns the meeting for its notes. With
+    /// <paramref name="discard"/> nothing more is sent, the file is deleted, and null comes back.
+    /// </summary>
+    public async Task<MeetingDoc?> StopAsync(bool discard)
+    {
+        if (discard)
+        {
+            _discarding = true;
+            _cancel.Cancel();
+        }
+        await StopListeningAsync();
         await Task.WhenAll(_workers);
         if (discard)
         {
-            try { File.Delete(FilePath); } catch (IOException) { }
+            try
+            {
+                File.Delete(FilePath);
+                var pending = MeetingWriter.PendingDir(FilePath);
+                if (Directory.Exists(pending)) Directory.Delete(pending, recursive: true);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log.Write($"Discarded meeting not fully removed: {e.Message}"); }
             Log.Write("Meeting notes discarded.");
             return null;
         }
-        List<(Utterance, bool)> failed;
-        lock (_gate) failed = _failed.ToList();
         var doc = Doc("writing");
-        Log.Write($"Meeting notes stopped after {Elapsed.TotalMinutes:0.0} min: {doc.Lines.Count} lines, {failed.Count} pieces not transcribed, {SentSeconds:0}s sent");
-        return (doc, failed);
+        Log.Write($"Meeting notes stopped after {Elapsed.TotalMinutes:0.0} min: {doc.Lines.Count} lines, {_kept} pieces kept for later, {SentSeconds:0}s sent");
+        return doc;
+    }
+
+    /// <summary>
+    /// Dikte is quitting mid-meeting: nothing is sent any more, what was not transcribed yet goes to the pending folder,
+    /// and the transcript so far is saved. The notes can be written later from the Meetings tab.
+    /// </summary>
+    public void Abandon()
+    {
+        _halted ??= "Dikte quit.";
+        _cancel.Cancel();
+        StopListeningAsync().Wait(TimeSpan.FromSeconds(4));
+        Task.WaitAll(_workers, TimeSpan.FromSeconds(3));
+        while (_queue.Reader.TryRead(out var left)) Keep(left.Piece, left.Mine);
+        Save("recording");
+        Log.Write($"Quit during meeting notes: transcript saved, {_kept} pieces kept for later.");
     }
 
     public void Dispose()
@@ -277,21 +355,19 @@ sealed class MeetingRecorder : IDisposable
 static class MeetingWriter
 {
     /// <summary>
-    /// Writes the notes and saves the file as "date title.md", leaving pieces the API refused on disk for a later try.
-    /// Returns the file's path; on an API failure the transcript is saved without notes and the error is rethrown.
+    /// Writes the notes and saves the file as "date title.md". Returns the file's path; on an API failure the transcript
+    /// is saved without notes and the error is rethrown.
     /// </summary>
-    public static async Task<string> WriteAsync(string path, MeetingDoc doc, IReadOnlyList<(Utterance Piece, bool Mine)> failed,
-        Transcriber api, Settings s, CancellationToken ct)
+    public static async Task<string> WriteAsync(string path, MeetingDoc doc, Transcriber api, Settings s, CancellationToken ct)
     {
-        doc.Pending = failed.Count;
-        var key = KeyStore.Get();
+        doc.Pending = PendingCount(path);
         try
         {
-            if (key is null) throw new ApiException("No OpenAI key is set.");
+            var key = KeyStore.Get() ?? throw new ApiException("No OpenAI key is set.");
             if (doc.Lines.Count == 0)
             {
-                doc.Notes = failed.Count > 0 ? "" : "_Nothing was said that could be written down._";
-                doc.Status = failed.Count > 0 ? "failed" : "done";
+                doc.Notes = doc.Pending > 0 ? "" : "_Nothing was said that could be written down._";
+                doc.Status = doc.Pending > 0 ? "failed" : "done";
             }
             else
             {
@@ -304,18 +380,17 @@ static class MeetingWriter
         catch (Exception e) when (e is ApiException or OperationCanceledException)
         {
             doc.Status = "failed";
-            path = Save(path, doc, failed);
+            Save(path, doc);
             throw;
         }
-        return Save(path, doc, failed);
+        return Save(path, doc);
     }
 
-    /// <summary>Reads a notes file back, transcribes what was left waiting, and writes the notes again.</summary>
-    public static async Task<string> RewriteAsync(string path, Transcriber api, Settings s, CancellationToken ct)
+    /// <summary>Reads a notes file back, transcribes what was kept waiting, and writes the notes again.</summary>
+    public static async Task<string> RewriteAsync(string path, Transcriber speech, Transcriber notes, Settings s, CancellationToken ct)
     {
-        var doc = MeetingFile.Parse(File.ReadAllText(path)) ?? throw new InvalidDataException("This is not one of Dikte's meeting files.");
+        var doc = MeetingFile.Parse(await File.ReadAllTextAsync(path, ct)) ?? throw new InvalidDataException("This is not one of Dikte's meeting files.");
         var pending = PendingDir(path);
-        var failed = new List<(Utterance, bool)>();
         if (Directory.Exists(pending))
         {
             var key = KeyStore.Get() ?? throw new ApiException("No OpenAI key is set.");
@@ -323,44 +398,50 @@ static class MeetingWriter
             foreach (var file in Directory.GetFiles(pending, "*.wav").Order())
             {
                 var (start, mine) = ParsePending(file);
-                var wav = await File.ReadAllBytesAsync(file, ct);
-                var piece = new Utterance(start, start + (wav.Length - 44) / (Segmenter.SampleRate * 2.0), wav[44..]);
-                try
-                {
-                    var text = await api.TranscribeAsync(wav, s, key, ct);
-                    if (!MeetingNotes.IsNoise(text)) doc.Lines.Add(new TranscriptLine(start, mine ? doc.Me : them, text));
-                }
-                catch (ApiException) { failed.Add((piece, mine)); }
+                var text = await speech.TranscribeAsync(await File.ReadAllBytesAsync(file, ct), s, key, ct);
+                if (!MeetingNotes.IsNoise(text)) doc.Lines.Add(new TranscriptLine(start, mine ? doc.Me : them, text));
+                // Saved after each piece, so a failure halfway loses nothing and the next try starts where this one stopped.
+                doc.Lines = doc.Lines.OrderBy(l => l.At).ToList();
+                File.Delete(file);
+                doc.Pending = PendingCount(path);
+                await File.WriteAllTextAsync(path, MeetingFile.Format(doc), ct);
             }
-            doc.Lines = doc.Lines.OrderBy(l => l.At).ToList();
         }
-        return await WriteAsync(path, doc, failed, api, s, ct);
+        return await WriteAsync(path, doc, notes, s, ct);
     }
 
-    /// <summary>Saves under the title (renaming the file if it changed) and keeps the waiting pieces beside its name.</summary>
-    static string Save(string path, MeetingDoc doc, IReadOnlyList<(Utterance Piece, bool Mine)> failed)
+    /// <summary>Saves under the title, renaming the file (and its pending pieces) when the title changed.</summary>
+    static string Save(string path, MeetingDoc doc)
     {
         var folder = Path.GetDirectoryName(path)!;
         var wanted = MeetingFile.FileName(doc.Started, doc.Title);
         var target = string.Equals(Path.GetFileName(path), wanted, StringComparison.OrdinalIgnoreCase) ? path : FreePath(folder, wanted);
         File.WriteAllText(target, MeetingFile.Format(doc));
-        if (target != path) File.Delete(path);
+        if (target == path) return target;
 
         var oldPending = PendingDir(path);
-        if (Directory.Exists(oldPending)) Directory.Delete(oldPending, recursive: true);
-        if (failed.Count > 0)
+        try
         {
-            var dir = PendingDir(target);
-            Directory.CreateDirectory(dir);
-            foreach (var (piece, mine) in failed)
-                File.WriteAllBytes(Path.Combine(dir, $"{piece.Start.ToString("0000.00", CultureInfo.InvariantCulture)}-{(mine ? "me" : "them")}.wav"),
-                    Wav.FromPcm16(piece.Pcm, Segmenter.SampleRate, 1));
+            if (Directory.Exists(oldPending)) Directory.Move(oldPending, PendingDir(target));
         }
+        catch (IOException e) { Log.Write($"Pending pieces not moved: {e.Message}"); }
+        // The new file is written; the old name going away is a nicety.
+        try { File.Delete(path); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log.Write($"Old meeting file not removed: {e.Message}"); }
         return target;
     }
 
-    /// <summary>Audio the API refused, kept in Dikte's own folder (not the notes folder, which may be synced).</summary>
+    /// <summary>Audio the API did not take, kept in Dikte's own folder (not the notes folder, which may be synced).</summary>
     public static string PendingDir(string meetingPath) => Path.Combine(Paths.Pending, Path.GetFileNameWithoutExtension(meetingPath));
+
+    static int PendingCount(string meetingPath)
+    {
+        var dir = PendingDir(meetingPath);
+        return Directory.Exists(dir) ? Directory.GetFiles(dir, "*.wav").Length : 0;
+    }
+
+    public static string PendingName(double start, bool mine) =>
+        $"{start.ToString("00000.00", CultureInfo.InvariantCulture)}-{(mine ? "me" : "them")}.wav";
 
     static (double Start, bool Mine) ParsePending(string file)
     {
@@ -379,16 +460,22 @@ static class MeetingWriter
         return path;
     }
 
-    /// <summary>The meetings in a folder, newest first.</summary>
+    /// <summary>
+    /// The meetings in a folder, newest first, from each file's opening (the header and the summary): a folder of
+    /// long transcripts, or one shared with other notes, is not read in full.
+    /// </summary>
     public static List<(string File, MeetingDoc Doc)> List(string folder)
     {
         var found = new List<(string, MeetingDoc)>();
         if (!Directory.Exists(folder)) return found;
+        var head = new char[4096];
         foreach (var file in Directory.EnumerateFiles(folder, "*.md"))
         {
             try
             {
-                if (MeetingFile.Parse(File.ReadAllText(file)) is { } doc) found.Add((file, doc));
+                using var reader = new StreamReader(file);
+                int read = reader.ReadBlock(head, 0, head.Length);
+                if (MeetingFile.Parse(new string(head, 0, read)) is { } doc) found.Add((file, doc));
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         }

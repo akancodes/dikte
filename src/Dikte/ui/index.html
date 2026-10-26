@@ -478,7 +478,17 @@ window.chrome?.webview?.addEventListener("message", e => {
     }
   }
   else if (m.type === "showMeeting") { showTab("meetings"); pendingOpen = m.file; send({ type: "openMeeting", file: m.file }); }
-  else if (m.type === "meetingsChanged") { send({ type: "listMeetings" }); if (openMeeting) send({ type: "openMeeting", file: openMeeting.file }); }
+  else if (m.type === "meetingsChanged") {
+    // The meeting just finished got its title for a file name, or was thrown away.
+    if (openMeeting && openMeeting.file === m.from) {
+      if (m.to) { pendingOpen = m.to; send({ type: "openMeeting", file: m.to }); } else { openMeeting = null; renderMeetingsBelow(); }
+    } else if (openMeeting) send({ type: "openMeeting", file: openMeeting.file });
+    send({ type: "listMeetings" });
+  }
+  else if (m.type === "meetingGone") {
+    if (openMeeting?.file === m.file || rewriting === m.file) { openMeeting = null; rewriting = null; toast("That meeting is no longer there"); renderMeetingsBelow(); }
+    if (pendingOpen === m.file) pendingOpen = null;
+  }
 });
 
 function toast(text) {
@@ -768,6 +778,7 @@ let openMeeting = null;       // the meeting being read
 let pendingOpen = null;       // a file asked for, shown when it arrives
 let rewriting = null;         // a file whose notes are being written again
 let meetBase = { s: 0, at: 0 };
+let typedWith = null;         // "who is on the call" as typed, until the app's state carries it
 const meetingsOn = () => !mac() && !!S?.settings && "meetingApps" in S.settings;
 
 function clock(s) {
@@ -810,7 +821,8 @@ function renderMeetingHero() {
         <div class="meet-acts"><input class="with" id="mwith" placeholder="Who is on the call?" autocomplete="off">
           <button class="btn-white" data-act="stop">Stop and write notes</button><button class="btn-ghost" data-act="discard">Discard</button></div>
         <div class="warn-line" id="mproblem"></div>`;
-      $("mwith").oninput = debounce(e => send({ type: "meetingWith", with: e.target.value }), 400);
+      const sendWith = debounce(v => send({ type: "meetingWith", with: v }), 400);
+      $("mwith").oninput = e => { typedWith = e.target.value; sendWith(typedWith); };
     }
     else if (phase === "writing") h.innerHTML = `<h1>Writing the notes…</h1><p>From ${clock(M.seconds)} of talk. It takes a few seconds; they open here.</p>`;
     h.querySelectorAll("[data-act]").forEach(b => b.onclick = () => {
@@ -826,7 +838,8 @@ function renderMeetingHero() {
     $("lvThemName").textContent = M.hearsApp ? (M.with && !/[,&+]/.test(M.with) ? M.with : M.app) : "";
     $("lvThemBar").style.display = M.hearsApp ? "" : "none";
     $("mproblem").textContent = M.problem || "";
-    setIfIdle($("mwith"), M.with);
+    if (typedWith === M.with) typedWith = null;
+    setIfIdle($("mwith"), typedWith ?? M.with);
   }
   // The latest lines, under the hero's text.
   let live = hero.querySelector(".live");
@@ -834,7 +847,10 @@ function renderMeetingHero() {
     if (!live) { live = document.createElement("div"); live.className = "live"; hero.appendChild(live); }
     live.innerHTML = M.lines.length ? M.lines.map(l => `<p><time>${esc(l.t)}</time><b>${esc(l.who)}</b>${esc(l.text)}</p>`).join("")
       : `<p class="quiet">What is said appears here a few seconds later.</p>`;
-  } else live?.remove();
+  } else {
+    live?.remove();
+    typedWith = null;
+  }
 }
 
 function meetingLevel(m) {

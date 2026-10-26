@@ -8,22 +8,37 @@ namespace Dikte;
 /// <summary>What Windows knows about call apps: which ones are using a microphone now, and an app's top process.</summary>
 static class Calls
 {
-    /// <summary>The processes recording from a microphone right now, Dikte left out: a call app among them is in a call.</summary>
-    public static List<(string Name, int Pid)> UsingMicrophone()
+    /// <summary>
+    /// The processes recording from a microphone right now, Dikte left out: a call app among them is in a call.
+    /// <paramref name="problem"/> is set when a microphone could not be read: for it, "nobody" would be a guess.
+    /// </summary>
+    public static List<(string Name, int Pid)> UsingMicrophone(out string? problem)
     {
         var found = new List<(string, int)>();
+        problem = null;
         int self = Environment.ProcessId;
         using var enumerator = new MMDeviceEnumerator();
         foreach (var device in enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active))
         {
-            var sessions = device.AudioSessionManager.Sessions;
-            for (int i = 0; i < sessions.Count; i++)
+            // Disposed each time: reading its session manager registers for notifications, which pile up otherwise.
+            using (device)
             {
-                var session = sessions[i];
-                if (session.State != AudioSessionState.AudioSessionStateActive) continue;
-                int pid = (int)session.GetProcessID;
-                if (pid == 0 || pid == self) continue;
-                if (Snapshot.NameOf(pid) is { } name) found.Add((name, pid));
+                try
+                {
+                    var sessions = device.AudioSessionManager.Sessions;
+                    for (int i = 0; i < sessions.Count; i++)
+                    {
+                        var session = sessions[i];
+                        if (session.State != AudioSessionState.AudioSessionStateActive) continue;
+                        int pid = (int)session.GetProcessID;
+                        if (pid == 0 || pid == self) continue;
+                        if (Snapshot.NameOf(pid) is { } name) found.Add((name, pid));
+                    }
+                }
+                catch (Exception e) when (e is COMException or InvalidCastException or InvalidOperationException)
+                {
+                    problem ??= e.Message;
+                }
             }
         }
         return found;

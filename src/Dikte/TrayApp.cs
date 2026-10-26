@@ -91,7 +91,6 @@ sealed class TrayApp : ApplicationContext
         _tray.ContextMenuStrip.Opening += (_, _) => BuildMenu(_tray.ContextMenuStrip);
         _tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) OpenWindow(); };
         _tray.BalloonTipClicked += (_, _) => OnBalloonClicked();
-        _tray.BalloonTipClosed += (_, _) => _balloon = null;
         BuildMenu(_tray.ContextMenuStrip);
 
         _hook = new KeyboardHook(OnKey);
@@ -934,8 +933,8 @@ sealed class TrayApp : ApplicationContext
         var apps = _settings.MeetingApps.ToList();
         Task.Run(() =>
         {
-            try { return (Found: Calls.UsingMicrophone(), Error: (string?)null); }
-            catch (Exception e) { return (Found: new List<(string Name, int Pid)>(), Error: e.Message); }
+            try { return (Found: Calls.UsingMicrophone(out var problem), Error: problem); }
+            catch (Exception e) { return (Found: new List<(string Name, int Pid)>(), Error: (string?)e.Message); }
         }).ContinueWith(t => _ui.Post(_ =>
         {
             _lookingForCalls = false;
@@ -943,7 +942,8 @@ sealed class TrayApp : ApplicationContext
             // Logged once, not every two seconds.
             if (error != _callLookError && error is not null) Log.Write($"Looking for calls failed: {error}");
             _callLookError = error;
-            var inCall = new List<string>();
+            // A microphone that could not be read may be the one the call is on: its calls are not taken as over.
+            var inCall = error is null ? new List<string>() : _calls.InCall.ToList();
             foreach (var (name, pid) in found)
             {
                 if (apps.FirstOrDefault(a => MeetingNotes.IsApp(name, a)) is not { } app) continue;
@@ -1019,8 +1019,10 @@ sealed class TrayApp : ApplicationContext
             int? pid = null;
             if (app.Length > 0)
                 pid = Calls.RootProcess(app, _calls.InCall.Contains(app) && _callPids.TryGetValue(app, out var callPid) ? callPid : null);
+            bool inCallAtStart = _calls.InCall.Contains(app);
             var folder = Paths.Meetings(_settings);
-            var meeting = await MeetingRecorder.StartAsync(app, pid, LastWith(folder, app), folder, _meetingApi, () => _settings);
+            var with = await Task.Run(() => LastWith(folder, app));
+            var meeting = await MeetingRecorder.StartAsync(app, pid, with, folder, _api, () => _settings);
             meeting.Changed += () => _ui.Post(_ => PushState(), null);
             _meeting = meeting;
             _meetingPhase = "recording";
@@ -1028,6 +1030,8 @@ sealed class TrayApp : ApplicationContext
             if (_settings.Sounds) Sounds.Start();
             if (_recorder is null)
                 _overlay.ShowMessage("Taking meeting notes", meeting.HearsApp ? $"{app} and your microphone" : meeting.Problem ?? "Your microphone", 3);
+            // The call ended while the app's sound was being opened.
+            if (inCallAtStart && !_calls.InCall.Contains(app)) _ = StopMeetingAsync(discard: false);
         }
         catch (Exception e)
         {
@@ -1049,21 +1053,23 @@ sealed class TrayApp : ApplicationContext
         UpdateIcon();
         PushState();
         if (!discard && _recorder is null) _overlay.ShowMessage("Writing the meeting notes", "They open when they are ready", 60);
+        string? written = null;
         try
         {
-            var result = await m.StopAsync(discard);
-            if (result is { } r)
+            var doc = await m.StopAsync(discard);
+            if (doc is not null)
             {
                 _stats.RecordSpend(DateTime.Now, m.SentSeconds, _settings.Model);
-                var path = await MeetingWriter.WriteAsync(m.FilePath, r.Doc, r.Failed, _meetingApi, _settings, CancellationToken.None);
-                Log.Write($"Meeting notes written ({r.Doc.Lines.Count} lines).");
+                written = m.FilePath; // until the notes give it its title
+                written = await MeetingWriter.WriteAsync(m.FilePath, doc, _meetingApi, _settings, CancellationToken.None);
+                Log.Write($"Meeting notes written ({doc.Lines.Count} lines).");
                 if (_settings.Sounds) Sounds.Stop();
                 if (_recorder is null) _overlay.ShowDone("Meeting notes ready");
-                if (_window is { Visible: true }) ShowMeeting(path);
+                if (_window is { Visible: true }) ShowMeeting(written);
                 else
                 {
-                    _balloon = ("ready", path);
-                    _tray.ShowBalloonTip(20_000, "Meeting notes ready", $"{r.Doc.Title} · click to read them", ToolTipIcon.None);
+                    _balloon = ("ready", written);
+                    _tray.ShowBalloonTip(20_000, "Meeting notes ready", $"{doc.Title} · click to read them", ToolTipIcon.None);
                 }
             }
             else if (_recorder is null) _overlay.ShowMessage("Meeting notes discarded", "", 1.5);
@@ -1081,7 +1087,8 @@ sealed class TrayApp : ApplicationContext
             if (_recorder is null) _levelTick.Stop();
             UpdateIcon();
             PushState();
-            _window?.Post(new { type = "meetingsChanged" });
+            // The file the page may be showing got its title for a name, or is gone.
+            _window?.Post(new { type = "meetingsChanged", from = Path.GetFileName(m.FilePath), to = written is null ? null : Path.GetFileName(written) });
         }
     }
 
@@ -1119,10 +1126,12 @@ sealed class TrayApp : ApplicationContext
         return File.Exists(path) ? path : null;
     }
 
-    void PostMeetings()
+    async void PostMeetings()
     {
+        var folder = Paths.Meetings(_settings);
         List<(string File, MeetingDoc Doc)> list;
-        try { list = MeetingWriter.List(Paths.Meetings(_settings)); }
+        // Off the UI thread: the folder may be a synced one that fetches files as they are read.
+        try { list = await Task.Run(() => MeetingWriter.List(folder)); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { list = new(); }
         _window?.Post(new
         {
@@ -1151,7 +1160,7 @@ sealed class TrayApp : ApplicationContext
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         if (doc is null)
         {
-            _window?.Post(new { type = "toast", text = "That meeting is no longer there" });
+            _window?.Post(new { type = "meetingGone", file = Path.GetFileName(file) });
             PostMeetings();
             return;
         }
@@ -1181,10 +1190,15 @@ sealed class TrayApp : ApplicationContext
     async Task RewriteMeetingAsync(string file)
     {
         var path = MeetingPath(file);
-        if (path is null || (_meeting is not null && string.Equals(path, _meeting.FilePath, StringComparison.OrdinalIgnoreCase))) return;
+        if (path is null || (_meeting is not null && string.Equals(path, _meeting.FilePath, StringComparison.OrdinalIgnoreCase)))
+        {
+            // Always answered, so the page's button does not wait forever.
+            PostMeeting(file);
+            return;
+        }
         try
         {
-            var written = await MeetingWriter.RewriteAsync(path, _meetingApi, _settings, CancellationToken.None);
+            var written = await MeetingWriter.RewriteAsync(path, _api, _meetingApi, _settings, CancellationToken.None);
             PostMeeting(Path.GetFileName(written));
             _window?.Post(new { type = "toast", text = "Notes written" });
         }
@@ -1341,7 +1355,13 @@ sealed class TrayApp : ApplicationContext
             if (_staged is not null) InstallUpdate();
             else _ = CheckForUpdatesAsync(manual: true);
         });
-        menu.Items.Add("Quit", null, (_, _) => ExitThread());
+        menu.Items.Add("Quit", null, (_, _) =>
+        {
+            if (_meetingPhase is not null && MessageBox.Show(
+                    "Dikte is taking meeting notes. Quit anyway?\n\nWhat was said so far is kept, and the notes can be written later from the Meetings tab.",
+                    "Dikte", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
+            ExitThread();
+        });
     }
 
     void RetryFailed()
@@ -1373,7 +1393,8 @@ sealed class TrayApp : ApplicationContext
         _updateTimer.Stop();
         _callTick.Stop();
         _settingsWatcher.Dispose();
-        // A meeting still recording keeps its transcript on disk; its notes can be written from the Meetings tab.
+        // A meeting still going keeps what was said on disk; its notes can be written from the Meetings tab.
+        _meeting?.Abandon();
         _meeting?.Dispose();
         _recorder?.Dispose();
         StopMicTest();

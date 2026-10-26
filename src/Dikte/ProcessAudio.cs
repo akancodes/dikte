@@ -107,9 +107,12 @@ sealed class ProcessAudio : IDisposable
                 }
             }
         }
-        catch (Exception e) when (e is COMException or InvalidCastException or InvalidOperationException)
+        catch (Exception e)
         {
-            if (!_stopping) Failed?.Invoke(e.Message);
+            // An exception escaping this thread would end the whole app.
+            if (_stopping) return;
+            Log.Write($"App audio capture ended: {e}");
+            try { Failed?.Invoke(e.Message); } catch (Exception inner) { Log.Write($"App audio failure report failed: {inner.Message}"); }
         }
     }
 

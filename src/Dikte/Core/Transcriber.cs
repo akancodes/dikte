@@ -6,7 +6,14 @@ using System.Text.Json.Nodes;
 
 namespace Dikte.Core;
 
-public sealed class ApiException(string message) : Exception(message);
+/// <param name="transient">A dropped connection, a timeout, a busy or broken server: worth trying again later.
+/// A refused key, an empty account or a bad request is not.</param>
+/// <param name="status">The HTTP status, or 0 when no answer came.</param>
+public sealed class ApiException(string message, bool transient = false, int status = 0) : Exception(message)
+{
+    public bool Transient { get; } = transient;
+    public int Status { get; } = status;
+}
 
 /// <summary>Talks to an OpenAI-compatible API: audio transcriptions, and the chat passes for modes, translate and edit.</summary>
 public sealed class Transcriber(HttpClient http)
@@ -133,11 +140,11 @@ public sealed class Transcriber(HttpClient http)
             }
             catch (HttpRequestException e)
             {
-                throw new ApiException($"Could not reach the API ({e.Message}).");
+                throw new ApiException($"Could not reach the API ({e.Message}).", transient: true);
             }
             catch (TaskCanceledException) when (!ct.IsCancellationRequested)
             {
-                throw new ApiException("The API did not answer in time.");
+                throw new ApiException("The API did not answer in time.", transient: true);
             }
 
             using (res)
@@ -154,7 +161,8 @@ public sealed class Transcriber(HttpClient http)
                     await Task.Delay(900, ct);
                     continue;
                 }
-                throw new ApiException(Describe(res.StatusCode, text));
+                var message = Describe(res.StatusCode, text);
+                throw new ApiException(message, transient: retryable && !message.Contains("out of credit", StringComparison.Ordinal), status: (int)res.StatusCode);
             }
         }
     }

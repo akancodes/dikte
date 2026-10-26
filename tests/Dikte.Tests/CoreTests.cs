@@ -170,7 +170,20 @@ public sealed class TranscriberTests : IDisposable
         _answers.Enqueue((401, "{\"error\":{\"message\":\"Incorrect API key\"}}"));
         var e = await Assert.ThrowsAsync<ApiException>(() => new Transcriber(new HttpClient()).TranscribeAsync(new byte[44], Config(), "k", default));
         Assert.Contains("refused", e.Message);
+        Assert.False(e.Transient);
         Assert.Single(_requests);
+    }
+
+    [Fact]
+    public async Task A_server_that_keeps_failing_is_worth_trying_later_an_empty_account_is_not()
+    {
+        _answers.Enqueue((503, "{}"));
+        _answers.Enqueue((503, "{}"));
+        _answers.Enqueue((429, "{\"error\":{\"message\":\"You exceeded your current quota\"}}"));
+        _answers.Enqueue((429, "{\"error\":{\"message\":\"You exceeded your current quota\"}}"));
+        var api = new Transcriber(new HttpClient());
+        Assert.True((await Assert.ThrowsAsync<ApiException>(() => api.TranscribeAsync(new byte[44], Config(), "k", default))).Transient);
+        Assert.False((await Assert.ThrowsAsync<ApiException>(() => api.TranscribeAsync(new byte[44], Config(), "k", default))).Transient);
     }
 
     [Fact]
