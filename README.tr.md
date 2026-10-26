@@ -61,6 +61,21 @@ Hangisinin kullanılacağı: modun kendi kısayolu önce gelir, sonra öndeki uy
 Cursor, Claude uygulaması, Terminal, iTerm2 gibi yerlerde kendiliğinden devrede), sonra aktif mod. Aktif modu pencerenin
 ana sayfasından, tepsi/menü çubuğu menüsünden, sonraki mod kısayoluyla ya da iPhone'da klavyenin üst şeridinden seçersin.
 
+**Toplantı notları** (Windows 11): Dikte bir aramayı dinleyip yazıya döker. Discord hazır gelir; başka arama
+uygulamaları Ayarlar'dan süreç adıyla eklenir (`Zoom`, `ms-teams`, `slack`).
+
+| Ne yaparsan | Ne olur |
+|---|---|
+| Discord'da bir aramaya katıl | Bir bildirim not almayı önerir: tıkla. Tıklamadan hiçbir şey kaydedilmez |
+| Ya da Meetings sekmesinden, tepsi menüsünden veya toplantı kısayolundan başlat | Açık arama uygulaması yoksa yalnızca mikrofon dinler: odadaki bir toplantı |
+| Aramayı kapat ya da **Stop and write notes** | Birkaç saniye sonra notlar açılır: kısa özet, kararlar, kimin ne yapacağı, önemli noktalar, açık sorular; altında tüm döküm |
+
+Windows, arama uygulamasının sesini diğer seslerden ayrı kaydeder (başka yerde çalan müzik ya da video karışmaz),
+mikrofonu da ayrı: mikrofon sensin, uygulama karşı taraf; döküm kimin ne dediğini böyle bilir. Arama sürerken kimlerin
+olduğunu yazarsan karşı taraf adıyla geçer. Sessizlik hiç gönderilmez; notları, toplantı hangi dildeyse o dilde bir
+sohbet modeli (`gpt-6-luna`, bir saatlik toplantı için bir sentin altında) yazar. Her toplantı `Belgeler\Dikte Meetings`
+klasöründe (ya da seçtiğin, eşitlenen bir klasörde) bir Markdown dosyasıdır. Karşı tarafı da kaydettiğini, başlamadan söyle.
+
 Türkçe ve İngilizceyi cümle içinde karıştırabilirsin; `language` boş kalsın. Ayarlar, gizlilik ve derleme için
 [İngilizce README](README.md).
 

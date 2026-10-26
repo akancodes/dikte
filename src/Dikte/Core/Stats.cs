@@ -39,6 +39,16 @@ public sealed class Stats(string path)
         catch (IOException) { }
     }
 
+    /// <summary>What meeting audio cost: it counts towards the month's spending but not as words you dictated.</summary>
+    public void RecordSpend(DateTime at, double seconds, string model)
+    {
+        var key = at.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        if (!_days.TryGetValue(key, out var day)) _days[key] = day = new DayStats();
+        day.Cost += seconds / 60 * PricePerMinute(model);
+        try { File.WriteAllText(path, JsonSerializer.Serialize(_days, Settings.Json)); }
+        catch (IOException) { }
+    }
+
     public StatsSummary Summary(DateTime now)
     {
         var today = now.Date;

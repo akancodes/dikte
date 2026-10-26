@@ -201,6 +201,60 @@ details .adv label { font-size: 12.5px; color: var(--muted); display: grid; gap:
   background: var(--panel); box-shadow: var(--shadow); border-left: 4px solid var(--amber); }
 .notice div { flex: 1; } .notice b { display: block; font-weight: 600; } .notice small { color: var(--muted); font-size: 12.5px; }
 
+/* ---------- meetings ---------- */
+.hero.meet { min-height: 0; padding-bottom: 28px; }
+.hero.meet .mic svg { width: 42px; height: 42px; }
+.meet-acts { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 18px; }
+.meet-acts .btn-white { padding: 11px 20px; }
+.with { border: 0; border-radius: 12px; padding: 11px 14px; background: rgba(255,255,255,.95); color: #18181b; width: 240px; outline: none; }
+.btn-ghost { border: 1px solid rgba(255,255,255,.45); background: transparent; color: #fff; border-radius: 12px; padding: 10px 16px; font-weight: 600; }
+.btn-ghost:hover { background: rgba(255,255,255,.12); }
+.meters { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; align-items: center; max-width: 440px; margin-top: 16px;
+  font-size: 12.5px; color: rgba(255,255,255,.85); }
+.meters i { display: block; height: 6px; border-radius: 99px; background: rgba(255,255,255,.2); overflow: hidden; }
+.meters i b { display: block; height: 100%; width: 0; background: #fff; transition: width .08s; }
+.meters .off { opacity: .5; }
+.live { grid-column: 1 / -1; margin-top: 18px; padding: 12px 16px; border-radius: 14px; background: rgba(0,0,0,.22); display: grid; gap: 5px;
+  font-size: 14px; user-select: text; }
+.live p { margin: 0; } .live time { opacity: .6; font-size: 12.5px; margin-right: 8px; font-variant-numeric: tabular-nums; }
+.live b { margin-right: 6px; } .live .quiet { opacity: .7; }
+.warn-line { margin-top: 10px; color: #fde68a; font-size: 13.5px; }
+.mlist { display: grid; gap: 8px; }
+.mitem { display: grid; grid-template-columns: 128px 1fr auto; gap: 16px; align-items: start; width: 100%; text-align: left; border: 0;
+  background: var(--panel); border-radius: 14px; padding: 14px 16px; box-shadow: var(--shadow); }
+.mitem:hover { background: var(--soft); }
+.mitem .when { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.mitem .when b { display: block; color: var(--text); font-size: 13px; font-weight: 600; }
+.mitem .what { min-width: 0; } .mitem .what b { display: block; font-weight: 650; font-size: 14.5px; }
+.mitem .what small { color: var(--muted); font-size: 13px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tags { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.tag { font-size: 12px; padding: 3px 9px; border-radius: 99px; background: var(--chip); color: var(--muted); white-space: nowrap; font-weight: 550; }
+.tag.warn { background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--amber); }
+.tag.rec { background: color-mix(in srgb, var(--red) 15%, transparent); color: var(--red); }
+.mdetail { background: var(--panel); border-radius: 18px; box-shadow: var(--shadow); padding: 20px 28px 26px; margin-top: 16px; }
+.mdetail h2 { margin: 10px 0 4px; font-size: 25px; line-height: 1.2; letter-spacing: -.02em; font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif; }
+.mdetail .meta { color: var(--muted); font-size: 13px; }
+.mdetail .acts { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0 4px; }
+.mdetail .notice { margin: 14px 0 0; box-shadow: none; background: var(--soft); }
+.notes { max-width: 860px; user-select: text; font-size: 14.5px; line-height: 1.6; margin-top: 14px; }
+.notes p { margin: 0 0 10px; } .notes h3 { font-size: 15.5px; margin: 22px 0 6px; } .notes h4 { font-size: 14px; margin: 14px 0 4px; color: var(--muted); }
+.notes ul { margin: 0 0 6px; padding-left: 22px; } .notes li { margin: 3px 0; }
+.notes li.todo { list-style: none; margin-left: -22px; display: flex; gap: 10px; }
+.notes li.todo i { flex: none; width: 15px; height: 15px; margin-top: 4px; border-radius: 5px; border: 1.5px solid var(--muted); }
+.notes li.todo.done i { background: var(--green); border-color: var(--green); }
+.notes code { font-family: "Cascadia Mono", Consolas, ui-monospace, monospace; background: var(--soft); padding: 1px 6px; border-radius: 5px; font-size: 13px; }
+details.transcript { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 14px; }
+details.transcript summary { cursor: pointer; font-weight: 650; list-style: none; }
+details.transcript summary::after { content: "Show"; margin-left: 10px; color: var(--muted); font-weight: 400; font-size: 13px; }
+details.transcript[open] summary::after { content: "Hide"; }
+.tlines { margin-top: 10px; max-width: 860px; }
+.tline { display: grid; grid-template-columns: 58px 1fr; gap: 10px; padding: 4px 0; user-select: text; }
+.tline time { color: var(--muted); font-size: 12.5px; padding-top: 2px; font-variant-numeric: tabular-nums; }
+.tline b { color: var(--blue); margin-right: 6px; font-weight: 650; } .tline.mine b { color: var(--violet); }
+.mempty { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.folder { display: flex; align-items: center; gap: 8px; } .folder .key { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 7px 10px; }
+@media (max-width: 860px) { .mitem { grid-template-columns: 1fr; gap: 6px; } .tags { justify-content: flex-start; } .mempty { grid-template-columns: 1fr; } }
+
 .toast { position: fixed; left: 50%; bottom: 18px; transform: translate(-50%, 20px); background: #18181b; color: #fff; padding: 8px 16px;
   border-radius: 99px; font-size: 13px; opacity: 0; transition: .25s; pointer-events: none; }
 .toast.on { opacity: 1; transform: translate(-50%, 0); }
@@ -216,7 +270,7 @@ details .adv label { font-size: 12.5px; color: var(--muted); display: grid; gap:
 <body>
 <header>
   <div class="brand"><div class="brand-mark"><i></i><i></i><i></i></div>Dikte</div>
-  <nav class="tabs"><button data-tab="home" class="on">Home</button><button data-tab="settings">Settings</button></nav>
+  <nav class="tabs"><button data-tab="home" class="on">Home</button><button data-tab="meetings" id="tabMeetings" style="display:none">Meetings</button><button data-tab="settings">Settings</button></nav>
   <div class="spacer"></div>
   <div class="pill" id="pill"><i></i><span>Ready</span></div>
 </header>
@@ -231,6 +285,16 @@ details .adv label { font-size: 12.5px; color: var(--muted); display: grid; gap:
       <canvas class="wave" id="wave"></canvas>
     </div>
     <div id="below"></div>
+  </section>
+
+  <section class="view" id="meetings">
+    <div class="hero meet" id="mhero">
+      <button class="mic" id="mbutton" title="Start or stop meeting notes">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3.5" width="14" height="17" rx="2.5"/><path d="M8.5 8.5h7M8.5 12h7M8.5 15.5h4"/></svg>
+      </button>
+      <div class="hero-text" id="mheroText"></div>
+    </div>
+    <div id="mbelow"></div>
   </section>
 
   <section class="view" id="settings">
@@ -301,6 +365,28 @@ details .adv label { font-size: 12.5px; color: var(--muted); display: grid; gap:
         </div>
       </div>
 
+      <div class="card" id="meetingCard" style="grid-column:1/-1;display:none">
+        <h3>Meeting notes</h3>
+        <p class="sub">Dikte records a call app's sound and your microphone, writes down who said what, and writes the notes when you stop.</p>
+        <div class="tools">
+          <div>
+            <div class="row"><label>Offer to take notes when a call starts<small>A notification you click; nothing is recorded until you do</small></label>
+              <label class="toggle"><input type="checkbox" id="meetingOffer"><span></span></label></div>
+            <div class="row" style="display:block"><label>Call apps<small>Their calls are noticed, and only their sound is recorded</small></label>
+              <div class="apps" id="meetingApps" style="margin-top:8px"></div></div>
+            <div class="bind" id="bind-meetingHotkey"></div>
+          </div>
+          <div>
+            <div class="row" style="display:block"><label>Your name in transcripts</label>
+              <input class="field" id="yourName" placeholder="Me" style="margin-top:6px"></div>
+            <div class="row" style="display:block"><label>Saved in<small>One Markdown file per meeting; a synced folder (Nextcloud, OneDrive) works</small></label>
+              <div class="folder" style="margin-top:8px"><span class="key" id="meetingsFolder"></span><button class="btn" id="pickFolder">Change</button><button class="btn quiet" id="openFolder">Open</button></div></div>
+            <div class="row" style="display:block"><label>Model that writes the notes</label>
+              <input class="field" id="meetingModel" list="chatModels" style="margin-top:6px"></div>
+          </div>
+        </div>
+      </div>
+
       <div class="card" id="toolsCard" style="grid-column:1/-1">
         <h3>Voice tools</h3>
         <p class="sub">Each one is optional: set a shortcut to switch it on.</p>
@@ -339,7 +425,7 @@ details .adv label { font-size: 12.5px; color: var(--muted); display: grid; gap:
   </section>
 </main>
 <div class="toast" id="toast"></div>
-<datalist id="chatModels"><option value="gpt-4.1-mini"><option value="gpt-4.1"><option value="gpt-5.6-luna"></datalist>
+<datalist id="chatModels"><option value="gpt-4.1-mini"><option value="gpt-4.1"><option value="gpt-5.6-luna"><option value="gpt-6-luna"></datalist>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -363,10 +449,12 @@ const mac = () => S?.platform === "mac";
 const keyName = p => KEY_NAMES[p.toLowerCase()] ?? p.toUpperCase();
 
 // ---------- tabs ----------
-document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
-  document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b));
-  document.querySelectorAll(".view").forEach(v => v.classList.toggle("on", v.id === b.dataset.tab));
-});
+function showTab(name) {
+  document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x.dataset.tab === name));
+  document.querySelectorAll(".view").forEach(v => v.classList.toggle("on", v.id === name));
+  if (name === "meetings") send({ type: "listMeetings" });
+}
+document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => showTab(b.dataset.tab));
 document.querySelectorAll("[data-send]").forEach(b => b.onclick = () => send({ type: b.dataset.send }));
 
 // ---------- messages from the app ----------
@@ -378,7 +466,19 @@ window.chrome?.webview?.addEventListener("message", e => {
   else if (m.type === "result") { lastResult = m.text; renderHero(); }
   else if (m.type === "keyResult") keyResult(m);
   else if (m.type === "toast") toast(m.text);
-  else if (m.type === "apps") { openApps = m.apps; renderModes(); }
+  else if (m.type === "apps") { openApps = m.apps; renderModes(); renderMeetingSettings(); }
+  else if (m.type === "meetingLevel") meetingLevel(m);
+  else if (m.type === "meetings") { meetingList = m.items; renderMeetingsBelow(); }
+  else if (m.type === "meeting") {
+    // The one asked for, the one open, or the one just written again (its file may have a new name).
+    if (rewriting || pendingOpen === m.file || !openMeeting || openMeeting.file === m.file) {
+      const fresh = openMeeting?.file !== m.file;
+      openMeeting = m; pendingOpen = null; rewriting = null; renderMeetingsBelow();
+      if (fresh) document.querySelector("main").scrollTop = 0;
+    }
+  }
+  else if (m.type === "showMeeting") { showTab("meetings"); pendingOpen = m.file; send({ type: "openMeeting", file: m.file }); }
+  else if (m.type === "meetingsChanged") { send({ type: "listMeetings" }); if (openMeeting) send({ type: "openMeeting", file: openMeeting.file }); }
 });
 
 function toast(text) {
@@ -395,11 +495,13 @@ function render() {
   const pill = { idle: ["Ready", "var(--green)"], listening: ["Listening", "var(--red)"], handsfree: ["Hands-free", "var(--orange)"],
     working: ["Transcribing", "var(--blue)"], error: ["Needs a look", "var(--amber)"] }[S.hasKey ? st : "error"];
   const blocked = mac() && !S.permissions.accessibility;
-  $("pill").querySelector("span").textContent = blocked ? "Needs permission" : S.hasKey ? pill[0] : "Not connected";
-  $("pill").querySelector("i").style.background = blocked ? "var(--amber)" : pill[1];
+  const meeting = S.hasKey && st === "idle" && meetingsOn() && { recording: ["Taking notes", "var(--red)"], writing: ["Writing notes", "var(--blue)"] }[S.meeting.phase];
+  $("pill").querySelector("span").textContent = blocked ? "Needs permission" : !S.hasKey ? "Not connected" : meeting ? meeting[0] : pill[0];
+  $("pill").querySelector("i").style.background = blocked ? "var(--amber)" : meeting ? meeting[1] : pill[1];
   renderHero();
   renderBelow();
   renderSettings();
+  renderMeetings();
 }
 
 function renderHero() {
@@ -453,6 +555,12 @@ function renderBelow() {
   if (mac() && S.globeHint)
     html += `<div class="notice"><div><b>Does holding Fn also open emoji or switch the keyboard language?</b><small>Set System Settings → Keyboard → “Press 🌐 key to” → Do Nothing, so it only talks.</small></div>
       <button class="btn" data-permission="keyboard">Keyboard settings</button></div>`;
+  if (meetingsOn() && S.meeting.phase === "recording")
+    html += `<div class="notice" style="border-left-color:var(--red)"><div><b>Taking meeting notes${S.meeting.app ? " · " + esc(S.meeting.app) : ""}</b><small>Stop them on the Meetings tab, from the tray, or by hanging up</small></div>
+      <button class="btn" data-tab-go="meetings">Open</button></div>`;
+  else if (meetingsOn() && S.call && S.meeting.phase === "idle")
+    html += `<div class="notice" style="border-left-color:var(--violet)"><div><b>${esc(S.call)} call in progress</b><small>Dikte can write down who said what, and the notes when it ends</small></div>
+      <button class="btn" data-start-meeting>Take notes</button></div>`;
   if (S.hasKey && S.settings.modes) html += modeBar();
   if (s.totalCount > 0) {
     html += `<div class="tiles">
@@ -473,6 +581,8 @@ function renderBelow() {
   }
   b.innerHTML = html;
   b.querySelectorAll("[data-setmode]").forEach(x => x.onclick = () => send({ type: "setMode", id: x.dataset.setmode }));
+  b.querySelectorAll("[data-tab-go]").forEach(x => x.onclick = () => showTab(x.dataset.tabGo));
+  b.querySelectorAll("[data-start-meeting]").forEach(x => x.onclick = () => { send({ type: "startMeeting" }); showTab("meetings"); });
   b.querySelectorAll("[data-permission]").forEach(x => x.onclick = () => send({ type: "openPermission", which: x.dataset.permission }));
   b.querySelectorAll("[data-copy]").forEach(x => x.onclick = () => { send({ type: "copy", text: S.history[+x.dataset.copy].text }); toast("Copied"); });
   b.querySelectorAll(".item .t").forEach(x => x.onclick = () => x.parentElement.classList.toggle("open"));
@@ -652,6 +762,196 @@ function renderSettings() {
   $("keyInfo").innerHTML = S.hasKey ? `Connected · <span class="key">${esc(S.keyHint)}</span>` : "Not set";
 }
 
+// ---------- meetings ----------
+let meetingList = null;       // the notes files, newest first
+let openMeeting = null;       // the meeting being read
+let pendingOpen = null;       // a file asked for, shown when it arrives
+let rewriting = null;         // a file whose notes are being written again
+let meetBase = { s: 0, at: 0 };
+const meetingsOn = () => !mac() && !!S?.settings && "meetingApps" in S.settings;
+
+function clock(s) {
+  s = Math.max(0, Math.floor(s));
+  const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, x = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${x}` : `${String(m).padStart(2, "0")}:${x}`;
+}
+
+function renderMeetings() {
+  const on = meetingsOn();
+  $("tabMeetings").style.display = on ? "" : "none";
+  $("meetingCard").style.display = on ? "" : "none";
+  if (!on) return;
+  renderMeetingHero();
+  renderMeetingSettings();
+}
+
+function renderMeetingHero() {
+  const M = S.meeting, h = $("mheroText"), hero = $("mhero");
+  const phase = S.hasKey ? M.phase : "nokey";
+  hero.className = "hero meet " + ({ recording: "listening", starting: "listening", writing: "working" }[phase] || "");
+  meetBase = { s: M.seconds, at: performance.now() };
+  const mode = phase + "|" + (phase === "idle" ? (S.call || "") + "|" + S.settings.meetingHotkey : M.app);
+  if (h.dataset.mode !== mode) {
+    h.dataset.mode = mode;
+    if (phase === "nokey") h.innerHTML = `<h1>Meeting notes</h1><p>Connect your OpenAI key on the Home tab first.</p>`;
+    else if (phase === "idle" && S.call) h.innerHTML = `<h1>${esc(S.call)} call in progress</h1>
+      <p>Take notes of it? Dikte hears ${esc(S.call)} and your microphone, writes down who said what, and writes the notes when the call ends.</p>
+      <div class="meet-acts"><button class="btn-white" data-act="start">Take notes</button></div>`;
+    else if (phase === "idle") h.innerHTML = `<h1>Meeting notes</h1>
+      <p>Start them in a call: Dikte hears the call app${S.settings.meetingApps.length ? ` (${esc(S.settings.meetingApps.join(", "))})` : ""} and your microphone,
+      writes down who said what, and when you stop it writes the notes: decisions, who does what, open questions.
+      With no call open it listens through your microphone, for a meeting in the room.</p>
+      <div class="meet-acts"><button class="btn-white" data-act="start">Start taking notes</button>${S.settings.meetingHotkey ? `<span style="opacity:.8">or tap <b>${esc(pretty(S.settings.meetingHotkey))}</b></span>` : ""}</div>`;
+    else if (phase === "starting") h.innerHTML = `<h1>Starting…</h1><p>Opening your microphone${M.app ? ` and ${esc(M.app)}'s sound` : ""}.</p>`;
+    else if (phase === "recording") {
+      h.innerHTML = `<h1>Taking notes · <span id="mclock">${clock(M.seconds)}</span></h1>
+        <p id="mwhat"></p>
+        <div class="meters"><span>${esc(S.settings.yourName || "You")}</span><i><b id="lvMe"></b></i><span id="lvThemName"></span><i id="lvThemBar"><b id="lvThem"></b></i></div>
+        <div class="meet-acts"><input class="with" id="mwith" placeholder="Who is on the call?" autocomplete="off">
+          <button class="btn-white" data-act="stop">Stop and write notes</button><button class="btn-ghost" data-act="discard">Discard</button></div>
+        <div class="warn-line" id="mproblem"></div>`;
+      $("mwith").oninput = debounce(e => send({ type: "meetingWith", with: e.target.value }), 400);
+    }
+    else if (phase === "writing") h.innerHTML = `<h1>Writing the notes…</h1><p>From ${clock(M.seconds)} of talk. It takes a few seconds; they open here.</p>`;
+    h.querySelectorAll("[data-act]").forEach(b => b.onclick = () => {
+      const act = b.dataset.act;
+      if (act === "discard" && !confirm("Throw this meeting away? Nothing of it is saved.")) return;
+      send({ type: { start: "startMeeting", stop: "stopMeeting", discard: "discardMeeting" }[act] });
+    });
+  }
+  $("mbutton").disabled = phase === "nokey" || phase === "starting" || phase === "writing";
+  $("mbutton").onclick = () => send({ type: phase === "recording" ? "stopMeeting" : "startMeeting" });
+  if (phase === "recording") {
+    $("mwhat").textContent = M.hearsApp ? `${M.app} and your microphone` : M.app ? "Your microphone" : "Your microphone · a meeting in the room";
+    $("lvThemName").textContent = M.hearsApp ? (M.with && !/[,&+]/.test(M.with) ? M.with : M.app) : "";
+    $("lvThemBar").style.display = M.hearsApp ? "" : "none";
+    $("mproblem").textContent = M.problem || "";
+    setIfIdle($("mwith"), M.with);
+  }
+  // The latest lines, under the hero's text.
+  let live = hero.querySelector(".live");
+  if (phase === "recording") {
+    if (!live) { live = document.createElement("div"); live.className = "live"; hero.appendChild(live); }
+    live.innerHTML = M.lines.length ? M.lines.map(l => `<p><time>${esc(l.t)}</time><b>${esc(l.who)}</b>${esc(l.text)}</p>`).join("")
+      : `<p class="quiet">What is said appears here a few seconds later.</p>`;
+  } else live?.remove();
+}
+
+function meetingLevel(m) {
+  const w = v => Math.min(100, Math.sqrt(v) * 140) + "%";
+  if ($("lvMe")) $("lvMe").style.width = w(m.me);
+  if ($("lvThem")) $("lvThem").style.width = w(m.them);
+}
+setInterval(() => {
+  if (S?.meeting?.phase === "recording" && $("mclock")) $("mclock").textContent = clock(meetBase.s + (performance.now() - meetBase.at) / 1000);
+}, 500);
+
+function meetingTags(x) {
+  let t = "";
+  if (x.recording) t += `<span class="tag rec">Recording</span>`;
+  else if (x.status === "writing" && S.meeting.phase === "writing") t += `<span class="tag">Writing…</span>`;
+  else if (x.status !== "done") t += `<span class="tag warn">Notes not written</span>`;
+  if (x.with) t += `<span class="tag">${esc(x.with)}</span>`;
+  if (x.app) t += `<span class="tag">${esc(x.app)}</span>`;
+  return t;
+}
+
+function renderMeetingsBelow() {
+  const b = $("mbelow");
+  if (openMeeting) {
+    const m = openMeeting, live = meetingList?.find(x => x.file === m.file)?.recording, busy = rewriting !== null;
+    const stuck = m.status !== "done" && !live;
+    b.innerHTML = `<div class="mdetail">
+      <button class="link" data-back>← All meetings</button>
+      <h2>${esc(m.title)}</h2>
+      <div class="meta">${esc(m.when)} · ${m.minutes} min${m.with ? ` · with ${esc(m.with)}` : ""}${m.app ? ` · ${esc(m.app)}` : ""}</div>
+      ${stuck || m.pending ? `<div class="notice"><div><b>${m.pending ? `${m.pending} part${m.pending > 1 ? "s" : ""} of the talk could not be transcribed yet` : "The notes were not written"}</b>
+        <small>${m.status === "recording" ? "Dikte stopped before the meeting ended; the transcript up to then is below." : "The transcript is saved."} Write the notes again to try now.</small></div></div>` : ""}
+      <div class="acts">
+        <button class="btn" data-mact="copy" ${m.notes ? "" : "disabled"}>Copy notes</button>
+        <button class="btn" data-mact="rewrite" ${busy || live ? "disabled" : ""}>${busy ? "Writing…" : "Write the notes again"}</button>
+        <button class="btn" data-mact="reveal">Show in folder</button>
+        <button class="btn quiet danger" data-mact="delete" ${live ? "disabled" : ""}>Delete</button>
+      </div>
+      <div class="notes">${m.notes ? mdHtml(m.notes) : `<p class="sub">${live ? "The notes are written when the meeting ends." : "No notes yet."}</p>`}</div>
+      <details class="transcript" ${m.notes ? "" : "open"}><summary>Transcript · ${m.lines.length} line${m.lines.length === 1 ? "" : "s"}</summary><div class="tlines">` +
+        (m.lines.map(l => `<div class="tline ${l.mine ? "mine" : ""}"><time>${esc(l.t)}</time><div><b>${esc(l.who)}</b>${esc(l.text)}</div></div>`).join("") || `<p class="sub">Nothing was heard.</p>`) +
+      `</div></details></div>`;
+    b.querySelector("[data-back]").onclick = () => { openMeeting = null; renderMeetingsBelow(); send({ type: "listMeetings" }); };
+    b.querySelectorAll("[data-mact]").forEach(x => x.onclick = () => {
+      const act = x.dataset.mact;
+      if (act === "copy") { send({ type: "copy", text: `# ${m.title}\n\n${m.notes}` }); toast("Notes copied"); }
+      else if (act === "rewrite") { rewriting = m.file; renderMeetingsBelow(); send({ type: "rewriteMeeting", file: m.file }); }
+      else if (act === "reveal") send({ type: "revealMeeting", file: m.file });
+      else if (act === "delete" && confirm(`Delete “${m.title}”? It goes to the Recycle Bin.`)) { openMeeting = null; send({ type: "deleteMeeting", file: m.file }); }
+    });
+    return;
+  }
+  if (!meetingList) { b.innerHTML = ""; return; }
+  if (!meetingList.length) {
+    b.innerHTML = `<div class="section-head"><h2>Your meetings</h2></div><div class="mempty">
+      <div class="step"><em>1</em><div>Join a call</div><p>On ${esc(S.settings.meetingApps[0] || "a call app")}. Dikte notices it and offers to take notes.</p></div>
+      <div class="step"><em>2</em><div>Talk as usual</div><p>Your microphone is you; the call's sound is everyone else.</p></div>
+      <div class="step"><em>3</em><div>Hang up</div><p>The notes are written and saved, one Markdown file per meeting.</p></div></div>`;
+    return;
+  }
+  b.innerHTML = `<div class="section-head"><h2>Your meetings</h2><button class="link" id="mfolder">Open folder</button></div><div class="mlist">` +
+    meetingList.map(x => {
+      const [day, time] = x.when.split(" · ");
+      const note = x.summary || (x.recording ? "Being written down now" : x.status === "recording" ? "Stopped before the notes were written"
+        : x.status === "failed" ? "The notes could not be written yet" : "");
+      return `<button class="mitem" data-open="${esc(x.file)}">
+      <div class="when"><b>${esc(day)}</b>${esc(time || "")} · ${x.minutes} min</div>
+      <div class="what"><b>${esc(x.title)}</b><small>${esc(note)}</small></div>
+      <div class="tags">${meetingTags(x)}</div></button>`;
+    }).join("") + `</div>`;
+  b.querySelectorAll("[data-open]").forEach(x => x.onclick = () => { pendingOpen = x.dataset.open; send({ type: "openMeeting", file: x.dataset.open }); });
+  $("mfolder").onclick = () => send({ type: "revealMeeting" });
+}
+
+/** The notes' Markdown: headings, paragraphs, bullets, to-do boxes, bold and code. */
+function mdHtml(text) {
+  const inline = s => esc(s).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>");
+  let html = "", list = false;
+  const close = () => { if (list) { html += "</ul>"; list = false; } };
+  const open = () => { if (!list) { html += "<ul>"; list = true; } };
+  for (const raw of text.split("\n")) {
+    const line = raw.trimEnd();
+    let m;
+    if ((m = line.match(/^\s*[-*] \[([ xX])\] (.*)$/))) { open(); html += `<li class="todo ${m[1] === " " ? "" : "done"}"><i></i><span>${inline(m[2])}</span></li>`; }
+    else if ((m = line.match(/^\s*[-*] (.*)$/))) { open(); html += `<li>${inline(m[1])}</li>`; }
+    else if ((m = line.match(/^(#{1,6}) (.*)$/))) { close(); html += m[1].length <= 2 ? `<h3>${inline(m[2])}</h3>` : `<h4>${inline(m[2])}</h4>`; }
+    else if (line.trim()) { close(); html += `<p>${inline(line)}</p>`; }
+    else close();
+  }
+  close();
+  return html;
+}
+
+function renderMeetingSettings() {
+  if (!meetingsOn()) return;
+  const c = S.settings;
+  $("meetingOffer").checked = c.meetingOffer;
+  setIfIdle($("yourName"), c.yourName);
+  setIfIdle($("meetingModel"), c.meetingModel);
+  $("meetingsFolder").textContent = S.meetingsFolder;
+  $("meetingsFolder").title = S.meetingsFolder;
+  renderBind("meetingHotkey", "Start and stop meeting notes", "Tap to start; tap again to stop and write the notes.", c.meetingHotkey, true);
+  const choices = [...new Set(openApps)].filter(a => !c.meetingApps.some(x => x.toLowerCase() === a.toLowerCase())).sort((a, b) => a.localeCompare(b));
+  const html = c.meetingApps.map((a, i) => `<span class="app">${esc(a)}<button data-rm="${i}" title="Remove">×</button></span>`).join("") +
+    `<select class="field" id="addMeetingApp"><option value="">+ Add an app…</option>${choices.map(a => `<option>${esc(a)}</option>`).join("")}<option value="?">Type a name…</option></select>`;
+  const box = $("meetingApps");
+  if (box.dataset.html === html) return;
+  box.innerHTML = html;
+  box.dataset.html = html;
+  box.querySelectorAll("[data-rm]").forEach(x => x.onclick = () => save({ meetingApps: S.settings.meetingApps.filter((_, i) => i !== +x.dataset.rm) }));
+  $("addMeetingApp").onfocus = () => send({ type: "listApps" });
+  $("addMeetingApp").onchange = e => {
+    let v = e.target.value;
+    if (v === "?") v = (prompt("Process name, as in Task Manager's Details tab, without .exe (Zoom, ms-teams, slack):") || "").trim();
+    if (v) save({ meetingApps: [...S.settings.meetingApps, v] }); else e.target.value = "";
+  };
+}
 // ---------- saving ----------
 function save(patch) { send({ type: "save", settings: patch }); }
 const debounce = (f, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => f(...a), ms); }; };
@@ -665,6 +965,11 @@ $("vocabulary").oninput = debounce(e => save({ vocabulary: e.target.value }), 60
 for (const id of ["model", "insertMode", "pasteShortcut"]) $(id).onchange = e => save({ [id]: e.target.value });
 for (const id of ["apiBase", "cleanupModel", "translateTo"]) $(id).onchange = e => save({ [id]: e.target.value.trim() });
 $("maxMinutes").onchange = e => save({ maxMinutes: +e.target.value });
+$("meetingOffer").onchange = e => save({ meetingOffer: e.target.checked });
+$("yourName").oninput = debounce(e => save({ yourName: e.target.value.trim() }), 600);
+$("meetingModel").onchange = e => save({ meetingModel: e.target.value.trim() });
+$("pickFolder").onclick = () => send({ type: "pickMeetingsFolder" });
+$("openFolder").onclick = () => send({ type: "revealMeeting" });
 $("micTest").onclick = () => send({ type: "micTest" });
 $("mic").onclick = () => S?.hasKey && send({ type: "toggleDictation" });
 $("changeKey").onclick = () => { $("keyBox").style.display = "block"; $("keyInput").focus(); };

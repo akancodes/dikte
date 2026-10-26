@@ -87,6 +87,27 @@ public sealed class Settings
     /// <summary>Installs new releases from GitHub on its own, while nothing is being dictated.</summary>
     public bool AutoUpdate { get; set; } = true;
 
+    /// <summary>
+    /// Call apps meeting notes listen to, by process name ("Discord"); a process whose name starts with one counts
+    /// too (DiscordPTB, DiscordCanary). A call is noticed when one of them starts using a microphone.
+    /// </summary>
+    public List<string> MeetingApps { get; set; } = new() { "Discord" };
+
+    /// <summary>When a call starts in one of <see cref="MeetingApps"/>, offer to take notes.</summary>
+    public bool MeetingOffer { get; set; } = true;
+
+    /// <summary>Tap to start meeting notes, tap again to stop and write them. Empty: none.</summary>
+    public string MeetingHotkey { get; set; } = "";
+
+    /// <summary>Where meeting notes are saved, one Markdown file each. Empty: "Dikte Meetings" in Documents.</summary>
+    public string MeetingsFolder { get; set; } = "";
+
+    /// <summary>Chat model that writes the notes from the transcript.</summary>
+    public string MeetingModel { get; set; } = "gpt-6-luna";
+
+    /// <summary>Your name in meeting transcripts. Empty: "Me".</summary>
+    public string YourName { get; set; } = "";
+
     public static readonly JsonSerializerOptions Json = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -135,6 +156,11 @@ public sealed class Settings
             m.Apps = m.Apps.Select(a => a.Trim()).Where(a => a.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             if (string.IsNullOrWhiteSpace(m.Id)) m.Id = Core.Modes.NewId(m.Name, Modes.Select(x => x.Id));
         }
+        MeetingApps = (MeetingApps ?? new()).Select(a => a.Trim()).Where(a => a.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        MeetingHotkey = MeetingHotkey?.Trim() ?? "";
+        MeetingsFolder = MeetingsFolder?.Trim() ?? "";
+        MeetingModel = MeetingModel?.Trim() ?? "";
+        YourName = YourName?.Trim() ?? "";
         ActiveMode ??= Cleanup && Modes.Any(m => m.Id == "clean") ? "clean" : Core.Modes.Plain;
         if (ActiveMode != Core.Modes.Plain && Modes.All(m => m.Id != ActiveMode)) ActiveMode = Core.Modes.Plain;
     }
@@ -152,7 +178,7 @@ public sealed class Settings
             if (m.Name.Length == 0) throw new FormatException("Every mode needs a name.");
             if (m.Instruction.Length == 0) throw new FormatException($"Tell the {m.Name} mode what to do with your words.");
         }
-        var shortcuts = new List<(string, string)> { (ToggleHotkey, "Tap to talk"), (TranslateHotkey, $"Write in {TranslateTo}"), (EditHotkey, "Edit the selection"), (RepasteHotkey, "Paste again"), (NextModeHotkey, "Next mode") };
+        var shortcuts = new List<(string, string)> { (ToggleHotkey, "Tap to talk"), (TranslateHotkey, $"Write in {TranslateTo}"), (EditHotkey, "Edit the selection"), (RepasteHotkey, "Paste again"), (NextModeHotkey, "Next mode"), (MeetingHotkey, "Meeting notes") };
         shortcuts.AddRange(Modes.Select(m => (m.Hotkey, $"Talk in {m.Name}")));
         foreach (var (shortcut, name) in shortcuts)
         {
@@ -171,6 +197,9 @@ public sealed class Settings
         if (Languages.Any(l => l.Length is < 2 or > 3 || !l.All(char.IsAsciiLetterLower)))
             throw new FormatException("languages must be ISO codes like \"tr\" and \"en\".");
         if (QuietLevel is < 0 or > 1) throw new FormatException("quietLevel must be between 0 and 1.");
+        if (string.IsNullOrWhiteSpace(MeetingModel)) throw new FormatException("meetingModel is empty.");
+        if (MeetingApps.Any(a => a.Contains('\\') || a.Contains('/') || a.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)))
+            throw new FormatException("meetingApps are process names like \"Discord\", without a folder or .exe.");
         if (MaxMinutes is < 1 or > 12) throw new FormatException("maxMinutes must be between 1 and 12 (the API takes files up to 25 MB).");
     }
 }

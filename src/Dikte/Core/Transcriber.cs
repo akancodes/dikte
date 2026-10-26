@@ -24,7 +24,8 @@ public sealed class Transcriber(HttpClient http)
         "replace it: no quotes, no explanation, no tags, the selection's own formatting kept unless told otherwise. " +
         "If <selection> is empty, write the text the instruction asks for, ready to paste, and nothing else.";
 
-    public async Task<string> TranscribeAsync(byte[] wav, Settings s, string apiKey, CancellationToken ct)
+    /// <param name="context">What was said just before (a meeting's last lines), so a piece cut out of a longer talk reads on from it.</param>
+    public async Task<string> TranscribeAsync(byte[] wav, Settings s, string apiKey, CancellationToken ct, string? context = null)
     {
         var json = await SendAsync(() =>
         {
@@ -36,6 +37,11 @@ public sealed class Transcriber(HttpClient http)
             form.Add(new StringContent("json"), "response_format");
             if (Languages.Pinned(s.Languages) is { } language) form.Add(new StringContent(language), "language");
             var prompt = Languages.BuildPrompt(s.Languages, s.Vocabulary);
+            if (!string.IsNullOrWhiteSpace(context))
+            {
+                context = context.Trim();
+                prompt = (prompt + " " + (context.Length > 300 ? context[^300..] : context)).Trim();
+            }
             if (prompt.Length > 0) form.Add(new StringContent(prompt), "prompt");
             return Request(s, apiKey, "audio/transcriptions", form);
         }, ct);
@@ -67,6 +73,10 @@ public sealed class Transcriber(HttpClient http)
         var edited = await ChatAsync(EditPrompt, $"<selection>\n{selection}\n</selection>\n<instruction>\n{instruction}\n</instruction>", s, apiKey, ct);
         return edited.Replace("<selection>", "").Replace("</selection>", "").Trim('\n', '\r');
     }
+
+    /// <summary>A meeting's notes as Markdown, starting with its title as a heading.</summary>
+    public Task<string> MeetingNotesAsync(MeetingDoc meeting, Settings s, string apiKey, CancellationToken ct) =>
+        ChatAsync(MeetingNotes.SystemPrompt, MeetingNotes.Request(meeting), s, apiKey, ct, s.MeetingModel);
 
     async Task<string> ChatAsync(string system, string user, Settings s, string apiKey, CancellationToken ct, string? model = null)
     {

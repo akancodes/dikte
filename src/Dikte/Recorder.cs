@@ -75,7 +75,8 @@ sealed class Recorder : IDisposable
         return names;
     }
 
-    static int FindDevice(string name)
+    /// <summary>The waveIn device number for a microphone name; -1 is the Windows default.</summary>
+    public static int FindDevice(string name)
     {
         if (string.IsNullOrWhiteSpace(name)) return -1; // WAVE_MAPPER: the Windows default
         var devices = Devices();

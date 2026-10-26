@@ -191,6 +191,27 @@ public sealed class TranscriberTests : IDisposable
         Assert.NotNull(await api.CheckKeyAsync(Config(), "bad", default));
     }
 
+    [Fact]
+    public async Task A_meetings_last_words_go_in_the_prompt()
+    {
+        _answers.Enqueue((200, "{\"text\":\"ok\"}"));
+        await new Transcriber(new HttpClient()).TranscribeAsync(new byte[44], Config(), "k", default, " Omer: Friday works. ");
+        Assert.Contains("TypeScript, Docker Omer: Friday works.\r\n", Assert.Single(_requests).body);
+    }
+
+    [Fact]
+    public async Task Meeting_notes_use_the_meeting_model()
+    {
+        _answers.Enqueue((200, "{\"choices\":[{\"message\":{\"content\":\"# Plan\\nNotes\"}}]}"));
+        var doc = new MeetingDoc { Lines = { new TranscriptLine(0, "Me", "hello") } };
+        Assert.Equal("# Plan\nNotes", await new Transcriber(new HttpClient()).MeetingNotesAsync(doc, Config(), "k", default));
+        var (path, _, body) = Assert.Single(_requests);
+        Assert.Equal("/v1/chat/completions", path);
+        Assert.Contains("\"model\":\"gpt-6-luna\"", body);
+        Assert.Contains("You write meeting notes", body);
+        Assert.Contains("[00:00] Me: hello", body);
+    }
+
     public void Dispose() => _server.Close();
 }
 
