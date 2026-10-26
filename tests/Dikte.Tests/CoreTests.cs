@@ -170,7 +170,20 @@ public sealed class TranscriberTests : IDisposable
         _answers.Enqueue((401, "{\"error\":{\"message\":\"Incorrect API key\"}}"));
         var e = await Assert.ThrowsAsync<ApiException>(() => new Transcriber(new HttpClient()).TranscribeAsync(new byte[44], Config(), "k", default));
         Assert.Contains("refused", e.Message);
+        Assert.False(e.Transient);
         Assert.Single(_requests);
+    }
+
+    [Fact]
+    public async Task A_server_that_keeps_failing_is_worth_trying_later_an_empty_account_is_not()
+    {
+        _answers.Enqueue((503, "{}"));
+        _answers.Enqueue((503, "{}"));
+        _answers.Enqueue((429, "{\"error\":{\"message\":\"You exceeded your current quota\"}}"));
+        _answers.Enqueue((429, "{\"error\":{\"message\":\"You exceeded your current quota\"}}"));
+        var api = new Transcriber(new HttpClient());
+        Assert.True((await Assert.ThrowsAsync<ApiException>(() => api.TranscribeAsync(new byte[44], Config(), "k", default))).Transient);
+        Assert.False((await Assert.ThrowsAsync<ApiException>(() => api.TranscribeAsync(new byte[44], Config(), "k", default))).Transient);
     }
 
     [Fact]
@@ -189,6 +202,27 @@ public sealed class TranscriberTests : IDisposable
         var api = new Transcriber(new HttpClient());
         Assert.Null(await api.CheckKeyAsync(Config(), "good", default));
         Assert.NotNull(await api.CheckKeyAsync(Config(), "bad", default));
+    }
+
+    [Fact]
+    public async Task A_meetings_last_words_go_in_the_prompt()
+    {
+        _answers.Enqueue((200, "{\"text\":\"ok\"}"));
+        await new Transcriber(new HttpClient()).TranscribeAsync(new byte[44], Config(), "k", default, " Omer: Friday works. ");
+        Assert.Contains("TypeScript, Docker Omer: Friday works.\r\n", Assert.Single(_requests).body);
+    }
+
+    [Fact]
+    public async Task Meeting_notes_use_the_meeting_model()
+    {
+        _answers.Enqueue((200, "{\"choices\":[{\"message\":{\"content\":\"# Plan\\nNotes\"}}]}"));
+        var doc = new MeetingDoc { Lines = { new TranscriptLine(0, "Me", "hello") } };
+        Assert.Equal("# Plan\nNotes", await new Transcriber(new HttpClient()).MeetingNotesAsync(doc, Config(), "k", default));
+        var (path, _, body) = Assert.Single(_requests);
+        Assert.Equal("/v1/chat/completions", path);
+        Assert.Contains("\"model\":\"gpt-6-luna\"", body);
+        Assert.Contains("You write meeting notes", body);
+        Assert.Contains("[00:00] Me: hello", body);
     }
 
     public void Dispose() => _server.Close();

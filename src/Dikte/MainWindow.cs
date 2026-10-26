@@ -82,11 +82,16 @@ sealed class MainWindow : Form
         _web.NavigateToString(LoadPage());
     }
 
-    public void Post(object message)
+    /// <summary>Sends a message to the page; false when the page is not there yet to take it.</summary>
+    public bool Post(object message)
     {
-        if (IsDisposed || _web.CoreWebView2 is null) return;
-        try { _web.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(message, Core.Settings.Json)); }
-        catch (Exception e) when (e is InvalidOperationException or COMException) { }
+        if (IsDisposed || _web.CoreWebView2 is null) return false;
+        try
+        {
+            _web.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(message, Core.Settings.Json));
+            return true;
+        }
+        catch (Exception e) when (e is InvalidOperationException or COMException) { return false; }
     }
 
     public void ShowAndFocus()

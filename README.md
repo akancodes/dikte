@@ -78,6 +78,23 @@ Cursor, the Claude app, Terminal, iTerm2 and other terminals out of the box), th
 window's Home page, from the tray or menu-bar menu, with the next-mode shortcut, or on iPhone from the keyboard's
 strip. Each mode can use its own chat model; the default `gpt-4.1-mini` answers in under a second.
 
+**Meeting notes** (Windows 11): Dikte listens to a call and writes it down. Discord works out of the box; any other
+call app can be added in Settings by its process name (`Zoom`, `ms-teams`, `slack`).
+
+| Do this | And |
+|---|---|
+| Join a call in Discord | A notification offers to take notes: click it. Nothing is recorded until you do |
+| Or start them from the Meetings tab, the tray menu or the meeting shortcut | With no call app open, only your microphone listens: a meeting in the room |
+| Hang up, or **Stop and write notes** | A few seconds later the notes open: a short summary, decisions, action items with who does them, key points and open questions, with the whole transcript under them |
+
+Windows records the call app's own sound apart from everything else (process loopback, so music or a video playing
+elsewhere stays out), and your microphone on its own: the microphone is you, the app is everyone else, so the
+transcript says who said what. Type who is on the call while it runs and the other side gets their name. Each stream is
+cut at its pauses and transcribed while the meeting goes on, silence is never sent, and a line your microphone only
+picked up from the speakers is dropped. The notes are written by a chat model (`gpt-6-luna`, under a cent for an hour)
+in the language the meeting was in. Each meeting is one Markdown file in `Documents\Dikte Meetings` (or any folder,
+a synced one too), and the Meetings tab lists them, shows the notes and can write them again.
+
 Both shortcuts are picked in Settings by pressing them: any key, key combination, or the middle and side mouse
 buttons (`Mouse 4` / `Mouse 5`, which then stop doing "back" and "forward"). A short hold that turns into a shortcut (`Ctrl + Win + →`, `Fn + F1`...) is cancelled silently and the shortcut
 works as usual. Mixing languages is fine: pick the ones you speak in Settings and the model is told to write each word
@@ -118,6 +135,12 @@ apply at once): `%APPDATA%\Dikte\` on Windows, `~/Library/Application Support/Di
 | `quietOtherAudio` | `true` | Turn other sounds down while recording (put back afterwards) |
 | `quietLevel` | `0.15` | What they are turned down to: `0` mutes |
 | `maxMinutes` | `10` | A recording stops and sends itself at this length |
+| `meetingApps` | `["Discord"]` | Windows: call apps meeting notes listen to, by process name; `Discord` also covers `DiscordPTB` and `DiscordCanary` |
+| `meetingOffer` | `true` | Windows: offer to take notes when one of them starts a call |
+| `meetingHotkey` | `""` | Windows: tap to start meeting notes, tap again to stop and write them |
+| `meetingsFolder` | `""` | Windows: where the notes go; empty is `Documents\Dikte Meetings`, `%VARIABLES%` work |
+| `meetingModel` | `gpt-6-luna` | Chat model that writes the notes |
+| `yourName` | `""` | Your name in meeting transcripts; empty is `Me` |
 
 ## Privacy
 
@@ -125,6 +148,10 @@ Audio is recorded only while you hold the key (or in hands-free mode), kept in m
 `apiBase` you set. Pasted text is marked so it stays out of Windows clipboard history and cloud clipboard.
 The log (`%APPDATA%\Dikte\dikte.log`) holds timings and errors, never what you said; the recent list
 (`history.json`) is on your disk only and can be cleared from the menu.
+
+Meeting notes record the other people on the call too: tell them before you start. Their audio, like yours, stays in
+memory and goes to `apiBase` piece by piece while the meeting runs; only pieces the API refused are written to disk
+(`%APPDATA%\Dikte\pending`), until the notes are written again. Transcripts and notes are files on your disk only.
 
 ## Good to know
 
@@ -146,7 +173,7 @@ dotnet publish src/Dikte -c Release -o dist   # dist/Dikte.exe, self-contained, 
 
 `src/Dikte/Core` is plain .NET (no Windows APIs) and is what the tests cover; the rest is the Windows shell around it:
 a low-level keyboard hook, `waveIn` recording at 16 kHz mono through NAudio, per-app volume through WASAPI,
-`SendInput` for pasting, a WinForms overlay that never takes focus, and the window: one HTML page (`src/Dikte/ui`)
+`SendInput` for pasting, a WinForms overlay that never takes focus, Core Audio process loopback for a call app's sound, and the window: one HTML page (`src/Dikte/ui`)
 in WebView2, which Windows 11 already has. The icons are drawn by `tools/make-icon.py` (standard library only), one bitmap per size Windows asks for.
 **macOS** is a Swift package in `mac/`: `DikteCore` is the same core in Swift (plain Foundation, tested on any OS),
 `Dikte` the menu-bar app around it (a CGEvent tap, AVAudioEngine, the same `ui/index.html` in WKWebView).

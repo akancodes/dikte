@@ -13,6 +13,12 @@ static class Paths
     public static readonly string Stats = Path.Combine(Dir, "stats.json");
     public static readonly string FailedAudio = Path.Combine(Dir, "last-failed.wav");
     public static readonly string Log = Path.Combine(Dir, "dikte.log");
+    public static readonly string Pending = Path.Combine(Dir, "pending");
+
+    /// <summary>Where meeting notes go: the folder set in Settings (environment variables allowed), else Documents\Dikte Meetings.</summary>
+    public static string Meetings(Core.Settings s) => s.MeetingsFolder.Length > 0
+        ? Path.GetFullPath(Environment.ExpandEnvironmentVariables(s.MeetingsFolder))
+        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Dikte Meetings");
 }
 
 static class Log

@@ -6,7 +6,14 @@ using System.Text.Json.Nodes;
 
 namespace Dikte.Core;
 
-public sealed class ApiException(string message) : Exception(message);
+/// <param name="transient">A dropped connection, a timeout, a busy or broken server: worth trying again later.
+/// A refused key, an empty account or a bad request is not.</param>
+/// <param name="status">The HTTP status, or 0 when no answer came.</param>
+public sealed class ApiException(string message, bool transient = false, int status = 0) : Exception(message)
+{
+    public bool Transient { get; } = transient;
+    public int Status { get; } = status;
+}
 
 /// <summary>Talks to an OpenAI-compatible API: audio transcriptions, and the chat passes for modes, translate and edit.</summary>
 public sealed class Transcriber(HttpClient http)
@@ -24,7 +31,8 @@ public sealed class Transcriber(HttpClient http)
         "replace it: no quotes, no explanation, no tags, the selection's own formatting kept unless told otherwise. " +
         "If <selection> is empty, write the text the instruction asks for, ready to paste, and nothing else.";
 
-    public async Task<string> TranscribeAsync(byte[] wav, Settings s, string apiKey, CancellationToken ct)
+    /// <param name="context">What was said just before (a meeting's last lines), so a piece cut out of a longer talk reads on from it.</param>
+    public async Task<string> TranscribeAsync(byte[] wav, Settings s, string apiKey, CancellationToken ct, string? context = null)
     {
         var json = await SendAsync(() =>
         {
@@ -36,6 +44,11 @@ public sealed class Transcriber(HttpClient http)
             form.Add(new StringContent("json"), "response_format");
             if (Languages.Pinned(s.Languages) is { } language) form.Add(new StringContent(language), "language");
             var prompt = Languages.BuildPrompt(s.Languages, s.Vocabulary);
+            if (!string.IsNullOrWhiteSpace(context))
+            {
+                context = context.Trim();
+                prompt = (prompt + " " + (context.Length > 300 ? context[^300..] : context)).Trim();
+            }
             if (prompt.Length > 0) form.Add(new StringContent(prompt), "prompt");
             return Request(s, apiKey, "audio/transcriptions", form);
         }, ct);
@@ -67,6 +80,10 @@ public sealed class Transcriber(HttpClient http)
         var edited = await ChatAsync(EditPrompt, $"<selection>\n{selection}\n</selection>\n<instruction>\n{instruction}\n</instruction>", s, apiKey, ct);
         return edited.Replace("<selection>", "").Replace("</selection>", "").Trim('\n', '\r');
     }
+
+    /// <summary>A meeting's notes as Markdown, starting with its title as a heading.</summary>
+    public Task<string> MeetingNotesAsync(MeetingDoc meeting, Settings s, string apiKey, CancellationToken ct) =>
+        ChatAsync(MeetingNotes.SystemPrompt, MeetingNotes.Request(meeting), s, apiKey, ct, s.MeetingModel);
 
     async Task<string> ChatAsync(string system, string user, Settings s, string apiKey, CancellationToken ct, string? model = null)
     {
@@ -123,11 +140,11 @@ public sealed class Transcriber(HttpClient http)
             }
             catch (HttpRequestException e)
             {
-                throw new ApiException($"Could not reach the API ({e.Message}).");
+                throw new ApiException($"Could not reach the API ({e.Message}).", transient: true);
             }
             catch (TaskCanceledException) when (!ct.IsCancellationRequested)
             {
-                throw new ApiException("The API did not answer in time.");
+                throw new ApiException("The API did not answer in time.", transient: true);
             }
 
             using (res)
@@ -144,7 +161,8 @@ public sealed class Transcriber(HttpClient http)
                     await Task.Delay(900, ct);
                     continue;
                 }
-                throw new ApiException(Describe(res.StatusCode, text));
+                var message = Describe(res.StatusCode, text);
+                throw new ApiException(message, transient: retryable && !message.Contains("out of credit", StringComparison.Ordinal), status: (int)res.StatusCode);
             }
         }
     }

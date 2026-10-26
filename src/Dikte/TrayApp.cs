@@ -24,9 +24,22 @@ sealed class TrayApp : ApplicationContext
     readonly Updater _updater = new();
     readonly System.Windows.Forms.Timer _updateTimer = new() { Interval = 4 * 60 * 60 * 1000 };
 
+    // Meeting notes: a call app's sound and the microphone, written down while the meeting goes on.
+    readonly HttpClient _meetingHttp = new() { Timeout = TimeSpan.FromMinutes(5) }; // the notes of a long call take a while
+    readonly Transcriber _meetingApi;
+    readonly CallWatch _calls = new(TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(60));
+    readonly System.Windows.Forms.Timer _callTick = new() { Interval = 2000 };
+    readonly Dictionary<string, int> _callPids = new(StringComparer.OrdinalIgnoreCase);
+    MeetingRecorder? _meeting;
+    string? _meetingPhase; // "starting", "recording" or "writing"
+    (string Kind, string Value)? _balloon; // what clicking the notification does: "offer" an app's call, or show a "ready" file
+    string? _showMeeting;
+    bool _lookingForCalls;
+    string? _callLookError;
+
     Settings _settings;
     HoldKeys _holds;
-    ToggleKey? _toggle, _repaste, _nextMode;
+    ToggleKey? _toggle, _repaste, _nextMode, _meetingKey;
     KeyboardHook? _hook;
     MouseHook? _mouseHook;
     KeyCapture? _capture;
@@ -60,11 +73,13 @@ sealed class TrayApp : ApplicationContext
     {
         _ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         _api = new Transcriber(_http);
+        _meetingApi = new Transcriber(_meetingHttp);
         _settings = LoadSettings(out var problem);
         _holds = NewHolds(_settings);
         _toggle = NewTap(_settings.ToggleHotkey);
         _repaste = NewTap(_settings.RepasteHotkey);
         _nextMode = NewTap(_settings.NextModeHotkey);
+        _meetingKey = NewTap(_settings.MeetingHotkey);
         _history = new History(Paths.History, _settings.HistorySize);
 
         _idleIcon = TrayIcons.Load("idle");
@@ -75,6 +90,7 @@ sealed class TrayApp : ApplicationContext
         _tray.ContextMenuStrip = new ContextMenuStrip();
         _tray.ContextMenuStrip.Opening += (_, _) => BuildMenu(_tray.ContextMenuStrip);
         _tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) OpenWindow(); };
+        _tray.BalloonTipClicked += (_, _) => OnBalloonClicked();
         BuildMenu(_tray.ContextMenuStrip);
 
         _hook = new KeyboardHook(OnKey);
@@ -82,6 +98,8 @@ sealed class TrayApp : ApplicationContext
         _watch.Tick += (_, _) => OnWatch();
         _watch.Start();
         _levelTick.Tick += (_, _) => OnLevelTick();
+        _callTick.Tick += (_, _) => LookForCalls();
+        _callTick.Start();
 
         _settingsWatcher = new FileSystemWatcher(Paths.Dir, Path.GetFileName(Paths.Settings))
         {
@@ -147,7 +165,7 @@ sealed class TrayApp : ApplicationContext
         string.IsNullOrWhiteSpace(shortcut) ? null : new ToggleKey(HotkeySpec.Parse(shortcut));
 
     static IEnumerable<string> Shortcuts(Settings s) =>
-        new[] { s.Hotkey, s.ToggleHotkey, s.TranslateHotkey, s.EditHotkey, s.RepasteHotkey, s.NextModeHotkey }
+        new[] { s.Hotkey, s.ToggleHotkey, s.TranslateHotkey, s.EditHotkey, s.RepasteHotkey, s.NextModeHotkey, s.MeetingHotkey }
             .Concat(s.Modes.Select(m => m.Hotkey)).Where(x => !string.IsNullOrWhiteSpace(x));
 
     /// <summary>The mouse hook sees every mouse move, so it runs only while a shortcut (or a capture) needs it.</summary>
@@ -172,6 +190,7 @@ sealed class TrayApp : ApplicationContext
         bool toggleChanged = fresh.ToggleHotkey != _settings.ToggleHotkey;
         bool repasteChanged = fresh.RepasteHotkey != _settings.RepasteHotkey;
         bool nextModeChanged = fresh.NextModeHotkey != _settings.NextModeHotkey;
+        bool meetingKeyChanged = fresh.MeetingHotkey != _settings.MeetingHotkey;
         bool updatesTurnedOn = fresh.AutoUpdate && !_settings.AutoUpdate;
         _settings = fresh;
         if (updatesTurnedOn) _ = CheckForUpdatesAsync(manual: false);
@@ -179,6 +198,7 @@ sealed class TrayApp : ApplicationContext
         if (toggleChanged) _toggle = NewTap(fresh.ToggleHotkey);
         if (repasteChanged) _repaste = NewTap(fresh.RepasteHotkey);
         if (nextModeChanged) _nextMode = NewTap(fresh.NextModeHotkey);
+        if (meetingKeyChanged) _meetingKey = NewTap(fresh.MeetingHotkey);
         UpdateMouseHook();
         _history = new History(Paths.History, fresh.HistorySize);
         PushState();
@@ -259,6 +279,14 @@ sealed class TrayApp : ApplicationContext
             if (n.Swallow) return true;
         }
 
+        if (_meetingKey is not null)
+        {
+            var k = _meetingKey.Feed(vk, isDown);
+            if (k.SuppressMenu) Native.Send(Native.Key(Native.VK_MENU_MASK, false), Native.Key(Native.VK_MENU_MASK, true));
+            if (k.Command == HotkeyCommand.Toggle) _ui.Post(_ => ToggleMeeting(), null);
+            if (k.Swallow) return true;
+        }
+
         if (_toggle is not null)
         {
             var t = _toggle.Feed(vk, isDown);
@@ -288,8 +316,9 @@ sealed class TrayApp : ApplicationContext
         _toggle?.Resync(Native.IsPhysicallyDown);
         _repaste?.Resync(Native.IsPhysicallyDown);
         _nextMode?.Resync(Native.IsPhysicallyDown);
+        _meetingKey?.Resync(Native.IsPhysicallyDown);
         if (_capture is not null && DateTime.Now - _captureStarted > TimeSpan.FromSeconds(12)) FinishCapture(CaptureOutcome.Cancelled, null);
-        if (_recorder is not null || _pending > 0 || _capture is not null || _micTest is not null) _lastUse = DateTime.Now;
+        if (_recorder is not null || _pending > 0 || _capture is not null || _micTest is not null || _meetingPhase is not null) _lastUse = DateTime.Now;
         else if (_staged is not null && DateTime.Now - _lastUse > TimeSpan.FromMinutes(1) && _window?.ContainsFocus != true) InstallUpdate();
 
         if (_recorder is null) return;
@@ -302,7 +331,7 @@ sealed class TrayApp : ApplicationContext
             ShowListening(recorder);
             if (_holds.IsLocked) _overlay.ShowHandsFree();
             if (_settings.Sounds) Sounds.Start();
-            if (_settings.QuietOtherAudio) _ducker.Duck(_settings.QuietLevel);
+            if (_settings.QuietOtherAudio) _ducker.Duck(_settings.QuietLevel, _meeting?.App);
             PushState();
         }
         if (_recorder.Duration.TotalMinutes >= _settings.MaxMinutes)
@@ -331,7 +360,9 @@ sealed class TrayApp : ApplicationContext
 
     void OnLevelTick()
     {
-        if (_window is { Visible: true } && _recorder is not null && _feedbackShown) _window.Post(new { type = "level", v = _recorder.Level });
+        if (_window is not { Visible: true }) return;
+        if (_recorder is not null && _feedbackShown) _window.Post(new { type = "level", v = _recorder.Level });
+        if (_meeting is { } m && _meetingPhase == "recording") _window.Post(new { type = "meetingLevel", me = m.MyLevel, them = m.TheirLevel });
     }
 
     void Run(HotkeyCommand command, HoldTarget target)
@@ -345,7 +376,7 @@ sealed class TrayApp : ApplicationContext
                     var recorder = _recorder;
                     ShowListening(recorder);
                     _overlay.ShowHandsFree();
-                    if (!_feedbackShown && _settings.QuietOtherAudio) _ducker.Duck(_settings.QuietLevel);
+                    if (!_feedbackShown && _settings.QuietOtherAudio) _ducker.Duck(_settings.QuietLevel, _meeting?.App);
                     _feedbackShown = true;
                     PushState();
                 }
@@ -400,7 +431,7 @@ sealed class TrayApp : ApplicationContext
 
     void EndRecording()
     {
-        _levelTick.Stop();
+        if (_meeting is null) _levelTick.Stop();
         _ducker.Restore();
     }
 
@@ -639,8 +670,18 @@ sealed class TrayApp : ApplicationContext
         PushState();
     }
 
-    void UpdateIcon() =>
-        _tray.Icon = _recorder is not null ? _recordingIcon : _pending > 0 ? _workingIcon : _idleIcon;
+    void UpdateIcon()
+    {
+        // Red while anything is recording, a meeting included: it is listening to the room.
+        _tray.Icon = _recorder is not null || _meetingPhase is "starting" or "recording" ? _recordingIcon
+            : _pending > 0 || _meetingPhase == "writing" ? _workingIcon : _idleIcon;
+        _tray.Text = _meetingPhase switch
+        {
+            "recording" => "Dikte · taking meeting notes",
+            "writing" => "Dikte · writing meeting notes",
+            _ => "Dikte",
+        };
+    }
 
     static int CountWords(string text) => text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
 
@@ -648,7 +689,7 @@ sealed class TrayApp : ApplicationContext
 
     void StartCapture(string target)
     {
-        bool known = target is "hotkey" or "toggleHotkey" or "translateHotkey" or "editHotkey" or "repasteHotkey" or "nextModeHotkey"
+        bool known = target is "hotkey" or "toggleHotkey" or "translateHotkey" or "editHotkey" or "repasteHotkey" or "nextModeHotkey" or "meetingHotkey"
             || (target.StartsWith("mode:", StringComparison.Ordinal) && _settings.Modes.Any(m => m.Id == target[5..]));
         if (_recorder is not null || !known) return;
         _capture = new KeyCapture();
@@ -698,7 +739,10 @@ sealed class TrayApp : ApplicationContext
     {
         switch (m.GetProperty("type").GetString())
         {
-            case "ready": PushState(); break;
+            case "ready":
+                PushState();
+                if (_showMeeting is { } show && _window?.Post(new { type = "showMeeting", file = Path.GetFileName(show) }) == true) _showMeeting = null;
+                break;
             case "save": SaveFromWindow(m.GetProperty("settings")); break;
             case "setKey": _ = SetKeyAsync(m.GetProperty("key").GetString() ?? ""); break;
             case "toggleDictation": ToggleDictation(); break;
@@ -714,6 +758,16 @@ sealed class TrayApp : ApplicationContext
             case "checkUpdates": _ = CheckForUpdatesAsync(manual: true); break;
             case "setMode": SetActiveMode(m.GetProperty("id").GetString() ?? Modes.Plain, announce: false); break;
             case "listApps": _window?.Post(new { type = "apps", apps = OpenApps() }); break;
+            case "startMeeting": StartMeeting(); break;
+            case "stopMeeting": _ = StopMeetingAsync(discard: false); break;
+            case "discardMeeting": _ = StopMeetingAsync(discard: true); break;
+            case "meetingWith": if (_meeting is not null) _meeting.With = m.GetProperty("with").GetString() ?? ""; break;
+            case "listMeetings": PostMeetings(); break;
+            case "openMeeting": PostMeeting(m.GetProperty("file").GetString() ?? ""); break;
+            case "rewriteMeeting": _ = RewriteMeetingAsync(m.GetProperty("file").GetString() ?? ""); break;
+            case "deleteMeeting": DeleteMeeting(m.GetProperty("file").GetString() ?? ""); break;
+            case "revealMeeting": RevealMeeting(m.TryGetProperty("file", out var file) ? file.GetString() : null); break;
+            case "pickMeetingsFolder": PickMeetingsFolder(); break;
         }
     }
 
@@ -819,6 +873,9 @@ sealed class TrayApp : ApplicationContext
                 capture = _captureTarget,
                 codingApps = Modes.CodingApps,
                 update = new { version = Updater.CurrentText, status = _updateStatus, busy = _updating },
+                meeting = MeetingState(),
+                call = _calls.InCall.FirstOrDefault(),
+                meetingsFolder = Paths.Meetings(_settings),
             },
         });
     }
@@ -866,6 +923,357 @@ sealed class TrayApp : ApplicationContext
         _ = test.StopAsync().ContinueWith(_ => test.Dispose(), TaskScheduler.Default);
     }
 
+    // ---- Meeting notes --------------------------------------------------------------------------
+
+    /// <summary>Every two seconds: which call apps hold a microphone, so a call can be offered, shown and ended.</summary>
+    void LookForCalls()
+    {
+        if (_lookingForCalls || _settings.MeetingApps.Count == 0) return;
+        _lookingForCalls = true;
+        var apps = _settings.MeetingApps.ToList();
+        Task.Run(() =>
+        {
+            try { return (Found: Calls.UsingMicrophone(out var problem), Error: problem); }
+            catch (Exception e) { return (Found: new List<(string Name, int Pid)>(), Error: (string?)e.Message); }
+        }).ContinueWith(t => _ui.Post(_ =>
+        {
+            _lookingForCalls = false;
+            var (found, error) = t.Result;
+            // Logged once, not every two seconds.
+            if (error != _callLookError && error is not null) Log.Write($"Looking for calls failed: {error}");
+            _callLookError = error;
+            // A microphone that could not be read may be the one the call is on: its calls are not taken as over.
+            var inCall = error is null ? new List<string>() : _calls.InCall.ToList();
+            foreach (var (name, pid) in found)
+            {
+                if (apps.FirstOrDefault(a => MeetingNotes.IsApp(name, a)) is not { } app) continue;
+                inCall.Add(app);
+                _callPids[app] = pid;
+            }
+            foreach (var (app, started) in _calls.Observe(inCall, DateTime.Now))
+            {
+                if (started) OnCallStarted(app);
+                else OnCallEnded(app);
+            }
+        }, null), TaskScheduler.Default);
+    }
+
+    void OnCallStarted(string app)
+    {
+        Log.Write($"{app} call noticed.");
+        if (_meetingPhase is null && _settings.MeetingOffer && KeyStore.Get() is not null)
+        {
+            _balloon = ("offer", app);
+            _tray.ShowBalloonTip(20_000, $"{app} call", "Click to take meeting notes", ToolTipIcon.None);
+        }
+        PushState();
+    }
+
+    void OnCallEnded(string app)
+    {
+        Log.Write($"{app} call over.");
+        if (_balloon is ("offer", var offered) && offered == app) _balloon = null;
+        // The call these notes were for is over: write them.
+        if (_meeting?.App == app && _meetingPhase == "recording")
+        {
+            if (_recorder is null) _overlay.ShowMessage($"{app} call ended", "Writing the meeting notes", 3);
+            _ = StopMeetingAsync(discard: false);
+        }
+        PushState();
+    }
+
+    void OnBalloonClicked()
+    {
+        var balloon = _balloon;
+        _balloon = null;
+        switch (balloon)
+        {
+            case ("offer", var app): StartMeeting(app); break;
+            case ("ready", var file): ShowMeeting(file); break;
+        }
+    }
+
+    void ToggleMeeting()
+    {
+        if (_meetingPhase == "recording") _ = StopMeetingAsync(discard: false);
+        else if (_meetingPhase is null) StartMeeting();
+    }
+
+    /// <summary>Starts notes for <paramref name="app"/>; with none, for the app in a call, else a call app that is open, else the microphone alone.</summary>
+    async void StartMeeting(string? app = null)
+    {
+        if (_meetingPhase is not null) return;
+        if (KeyStore.Get() is null)
+        {
+            _overlay.ShowMessage("Connect your OpenAI key first", "Meeting notes need it to write anything down", 4);
+            OpenWindow();
+            return;
+        }
+        _balloon = null;
+        _meetingPhase = "starting";
+        UpdateIcon();
+        PushState();
+        try
+        {
+            app ??= _calls.InCall.FirstOrDefault() ?? _settings.MeetingApps.FirstOrDefault(a => Calls.RootProcess(a, null) is not null) ?? "";
+            int? pid = null;
+            if (app.Length > 0)
+                pid = Calls.RootProcess(app, _calls.InCall.Contains(app) && _callPids.TryGetValue(app, out var callPid) ? callPid : null);
+            bool inCallAtStart = _calls.InCall.Contains(app);
+            var folder = Paths.Meetings(_settings);
+            var with = await Task.Run(() => LastWith(folder, app));
+            var meeting = await MeetingRecorder.StartAsync(app, pid, with, folder, _api, () => _settings);
+            meeting.Changed += () => _ui.Post(_ => PushState(), null);
+            _meeting = meeting;
+            _meetingPhase = "recording";
+            _levelTick.Start();
+            if (_settings.Sounds) Sounds.Start();
+            if (_recorder is null)
+                _overlay.ShowMessage("Taking meeting notes", meeting.HearsApp ? $"{app} and your microphone" : meeting.Problem ?? "Your microphone", 3);
+            // The call ended while the app's sound was being opened.
+            if (inCallAtStart && !_calls.InCall.Contains(app)) _ = StopMeetingAsync(discard: false);
+        }
+        catch (Exception e)
+        {
+            _meetingPhase = null;
+            Log.Write($"Meeting notes did not start: {e}");
+            Fail("Meeting notes could not start", e.Message);
+        }
+        UpdateIcon();
+        PushState();
+    }
+
+    /// <summary>Stops listening and writes the notes, or with <paramref name="discard"/> throws the meeting away.</summary>
+    async Task StopMeetingAsync(bool discard)
+    {
+        var m = _meeting;
+        if (m is null || _meetingPhase != "recording") return;
+        _meetingPhase = "writing";
+        if (_recorder is null) _levelTick.Stop();
+        UpdateIcon();
+        PushState();
+        if (!discard && _recorder is null) _overlay.ShowMessage("Writing the meeting notes", "They open when they are ready", 60);
+        string? written = null;
+        try
+        {
+            var doc = await m.StopAsync(discard);
+            if (doc is not null)
+            {
+                _stats.RecordSpend(DateTime.Now, m.SentSeconds, _settings.Model);
+                written = m.FilePath; // until the notes give it its title
+                written = await MeetingWriter.WriteAsync(m.FilePath, doc, _meetingApi, _settings, CancellationToken.None);
+                Log.Write($"Meeting notes written ({doc.Lines.Count} lines).");
+                if (_settings.Sounds) Sounds.Stop();
+                if (_recorder is null) _overlay.ShowDone("Meeting notes ready");
+                if (_window is { Visible: true }) ShowMeeting(written);
+                else
+                {
+                    _balloon = ("ready", written);
+                    _tray.ShowBalloonTip(20_000, "Meeting notes ready", $"{doc.Title} · click to read them", ToolTipIcon.None);
+                }
+            }
+            else if (_recorder is null) _overlay.ShowMessage("Meeting notes discarded", "", 1.5);
+        }
+        catch (Exception e)
+        {
+            Log.Write($"Meeting notes not written: {e}");
+            Fail("Meeting notes not written", $"{e.Message} The transcript is saved: Meetings → Write the notes again.");
+        }
+        finally
+        {
+            m.Dispose();
+            _meeting = null;
+            _meetingPhase = null;
+            if (_recorder is null) _levelTick.Stop();
+            UpdateIcon();
+            PushState();
+            // The file the page may be showing got its title for a name, or is gone.
+            _window?.Post(new { type = "meetingsChanged", from = Path.GetFileName(m.FilePath), to = written is null ? null : Path.GetFileName(written) });
+        }
+    }
+
+    object MeetingState()
+    {
+        var m = _meeting;
+        var me = _settings.YourName.Length > 0 ? _settings.YourName : "Me";
+        return new
+        {
+            phase = _meetingPhase ?? "idle",
+            app = m?.App ?? "",
+            with = m?.With ?? "",
+            seconds = m is null ? 0 : (int)m.Elapsed.TotalSeconds,
+            hearsApp = m?.HearsApp ?? false,
+            problem = m?.Problem,
+            lines = m is null ? Array.Empty<object>()
+                : m.Recent(6).Select(l => (object)new { t = MeetingFile.Clock(l.At), who = l.Speaker, text = l.Text, mine = l.Speaker == me }).ToArray(),
+        };
+    }
+
+    /// <summary>Who was on the last call in this app, to fill in the next one.</summary>
+    static string LastWith(string folder, string app)
+    {
+        if (app.Length == 0) return "";
+        try { return MeetingWriter.List(folder).Select(f => f.Doc).FirstOrDefault(d => d.App == app && d.With.Length > 0)?.With ?? ""; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return ""; }
+    }
+
+    /// <summary>A file name from the page, as a path inside the notes folder; null when it is not a meeting there.</summary>
+    string? MeetingPath(string? file)
+    {
+        var name = Path.GetFileName(file ?? "");
+        if (!name.EndsWith(".md", StringComparison.OrdinalIgnoreCase)) return null;
+        var path = Path.Combine(Paths.Meetings(_settings), name);
+        return File.Exists(path) ? path : null;
+    }
+
+    async void PostMeetings()
+    {
+        var folder = Paths.Meetings(_settings);
+        List<(string File, MeetingDoc Doc)> list;
+        // Off the UI thread: the folder may be a synced one that fetches files as they are read.
+        try { list = await Task.Run(() => MeetingWriter.List(folder)); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { list = new(); }
+        _window?.Post(new
+        {
+            type = "meetings",
+            items = list.Select(x => new
+            {
+                file = Path.GetFileName(x.File),
+                title = x.Doc.Title,
+                when = WhenMeeting(x.Doc.Started),
+                minutes = (int)Math.Round(x.Doc.Minutes),
+                app = x.Doc.App,
+                with = x.Doc.With,
+                status = x.Doc.Status,
+                pending = x.Doc.Pending,
+                summary = FirstSentence(x.Doc.Notes),
+                recording = _meeting is not null && string.Equals(x.File, _meeting.FilePath, StringComparison.OrdinalIgnoreCase),
+            }),
+        });
+    }
+
+    void PostMeeting(string file)
+    {
+        var path = MeetingPath(file);
+        MeetingDoc? doc = null;
+        try { if (path is not null) doc = MeetingFile.Parse(File.ReadAllText(path)); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        if (doc is null)
+        {
+            _window?.Post(new { type = "meetingGone", file = Path.GetFileName(file) });
+            PostMeetings();
+            return;
+        }
+        _window?.Post(new
+        {
+            type = "meeting",
+            file = Path.GetFileName(path),
+            title = doc.Title,
+            when = WhenMeeting(doc.Started),
+            minutes = (int)Math.Round(doc.Minutes),
+            app = doc.App,
+            with = doc.With,
+            status = doc.Status,
+            pending = doc.Pending,
+            notes = doc.Notes,
+            lines = doc.Lines.Select(l => new { t = MeetingFile.Clock(l.At), who = l.Speaker, text = l.Text, mine = l.Speaker == doc.Me }),
+        });
+    }
+
+    void ShowMeeting(string path)
+    {
+        _showMeeting = path;
+        OpenWindow();
+        if (_window?.Post(new { type = "showMeeting", file = Path.GetFileName(path) }) == true) _showMeeting = null;
+    }
+
+    async Task RewriteMeetingAsync(string file)
+    {
+        var path = MeetingPath(file);
+        if (path is null || (_meeting is not null && string.Equals(path, _meeting.FilePath, StringComparison.OrdinalIgnoreCase)))
+        {
+            // Always answered, so the page's button does not wait forever.
+            PostMeeting(file);
+            return;
+        }
+        try
+        {
+            var written = await MeetingWriter.RewriteAsync(path, _api, _meetingApi, _settings, CancellationToken.None);
+            PostMeeting(Path.GetFileName(written));
+            _window?.Post(new { type = "toast", text = "Notes written" });
+        }
+        catch (Exception e) when (e is ApiException or IOException or InvalidDataException or UnauthorizedAccessException or OperationCanceledException)
+        {
+            Log.Write($"Writing the notes again failed: {e.Message}");
+            _window?.Post(new { type = "toast", text = e.Message });
+            PostMeeting(file);
+        }
+        PostMeetings();
+    }
+
+    void DeleteMeeting(string file)
+    {
+        var path = MeetingPath(file);
+        if (path is null || (_meeting is not null && string.Equals(path, _meeting.FilePath, StringComparison.OrdinalIgnoreCase))) return;
+        try
+        {
+            // To the Recycle Bin: a meeting deleted by mistake can be put back.
+            Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(path, Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs, Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+            var pending = MeetingWriter.PendingDir(path);
+            if (Directory.Exists(pending)) Directory.Delete(pending, recursive: true);
+            _window?.Post(new { type = "toast", text = "Moved to the Recycle Bin" });
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or OperationCanceledException)
+        {
+            _window?.Post(new { type = "toast", text = e.Message });
+        }
+        PostMeetings();
+    }
+
+    void RevealMeeting(string? file)
+    {
+        var folder = Paths.Meetings(_settings);
+        try
+        {
+            Directory.CreateDirectory(folder);
+            var path = MeetingPath(file);
+            Process.Start(new ProcessStartInfo("explorer.exe", path is null ? $"\"{folder}\"" : $"/select,\"{path}\"") { UseShellExecute = true });
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        {
+            _window?.Post(new { type = "toast", text = e.Message });
+        }
+    }
+
+    void PickMeetingsFolder()
+    {
+        using var dialog = new FolderBrowserDialog
+        {
+            Description = "Where Dikte saves meeting notes",
+            UseDescriptionForTitle = true,
+            InitialDirectory = Paths.Meetings(_settings),
+            ShowNewFolderButton = true,
+        };
+        if (dialog.ShowDialog(_window) == DialogResult.OK)
+        {
+            SaveFromWindow(JsonSerializer.SerializeToElement(new { meetingsFolder = dialog.SelectedPath }, Settings.Json));
+            PostMeetings();
+        }
+    }
+
+    static string WhenMeeting(DateTime at) =>
+        (at.Date == DateTime.Today ? "Today" : at.Date == DateTime.Today.AddDays(-1) ? "Yesterday" : at.ToString("ddd d MMM", CultureInfo.InvariantCulture))
+        + at.ToString(" · HH:mm", CultureInfo.InvariantCulture);
+
+    /// <summary>The notes' opening sentence, for the list: the summary starts them.</summary>
+    static string FirstSentence(string notes)
+    {
+        var first = notes.Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0 && !l.StartsWith('#') && !l.StartsWith('-') && !l.StartsWith('_')) ?? "";
+        int dot = first.IndexOf(". ", StringComparison.Ordinal);
+        if (dot > 20) first = first[..(dot + 1)];
+        return first.Length > 180 ? first[..180].TrimEnd() + "…" : first;
+    }
+
     // ---- Updates --------------------------------------------------------------------------------
 
     /// <summary>Finds and downloads a newer release; OnWatch installs it once Dikte has been idle a minute.</summary>
@@ -909,7 +1317,7 @@ sealed class TrayApp : ApplicationContext
     void InstallUpdate()
     {
         var staged = _staged;
-        if (staged is null || _recorder is not null || _pending > 0) return;
+        if (staged is null || _recorder is not null || _pending > 0 || _meetingPhase is not null) return;
         _staged = null;
         if (Updater.InstallAndRestart(staged, openWindow: _window is { Visible: true }))
         {
@@ -929,6 +1337,10 @@ sealed class TrayApp : ApplicationContext
         open.Font = new Font(open.Font, FontStyle.Bold);
         menu.Items.Add(open);
         menu.Items.Add(_recorder is null ? "Start hands-free dictation" : "Stop and send", null, (_, _) => ToggleDictation());
+        if (_meetingPhase is null)
+            menu.Items.Add(_calls.InCall.FirstOrDefault() is { } call ? $"Take meeting notes ({call} call)" : "Take meeting notes", null, (_, _) => StartMeeting());
+        else if (_meetingPhase == "recording")
+            menu.Items.Add("Stop and write meeting notes", null, (_, _) => _ = StopMeetingAsync(discard: false));
         var modes = new ToolStripMenuItem($"Mode: {Modes.NameOf(_settings, _settings.ActiveMode)}");
         foreach (var (id, name) in new[] { (Modes.Plain, Modes.NameOf(_settings, Modes.Plain)) }.Concat(_settings.Modes.Select(m => (m.Id, m.Name))))
         {
@@ -943,7 +1355,13 @@ sealed class TrayApp : ApplicationContext
             if (_staged is not null) InstallUpdate();
             else _ = CheckForUpdatesAsync(manual: true);
         });
-        menu.Items.Add("Quit", null, (_, _) => ExitThread());
+        menu.Items.Add("Quit", null, (_, _) =>
+        {
+            if (_meetingPhase is not null && MessageBox.Show(
+                    "Dikte is taking meeting notes. Quit anyway?\n\nWhat was said so far is kept, and the notes can be written later from the Meetings tab.",
+                    "Dikte", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
+            ExitThread();
+        });
     }
 
     void RetryFailed()
@@ -973,7 +1391,11 @@ sealed class TrayApp : ApplicationContext
         _watch.Stop();
         _levelTick.Stop();
         _updateTimer.Stop();
+        _callTick.Stop();
         _settingsWatcher.Dispose();
+        // A meeting still going keeps what was said on disk; its notes can be written from the Meetings tab.
+        _meeting?.Abandon();
+        _meeting?.Dispose();
         _recorder?.Dispose();
         StopMicTest();
         _ducker.RestoreAndWait(TimeSpan.FromSeconds(2));
@@ -982,6 +1404,7 @@ sealed class TrayApp : ApplicationContext
         _tray.Dispose();
         _overlay.Dispose();
         _http.Dispose();
+        _meetingHttp.Dispose();
         _updater.Dispose();
         base.ExitThreadCore();
     }

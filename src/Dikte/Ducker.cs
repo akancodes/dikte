@@ -16,9 +16,10 @@ sealed class Ducker
     Dictionary<string, float>? _saved;
     Task _work = Task.CompletedTask;
 
-    public void Duck(double level)
+    /// <param name="spare">An app left as it is: the call meeting notes are recording, which must stay loud enough to hear.</param>
+    public void Duck(double level, string? spare = null)
     {
-        lock (_gate) _work = _work.ContinueWith(_ => DuckNow((float)level), TaskScheduler.Default);
+        lock (_gate) _work = _work.ContinueWith(_ => DuckNow((float)level, spare), TaskScheduler.Default);
     }
 
     public void Restore()
@@ -48,7 +49,7 @@ sealed class Ducker
         try { File.Delete(StatePath); } catch (IOException) { }
     }
 
-    void DuckNow(float level)
+    void DuckNow(float level, string? spare)
     {
         if (_saved is not null) return;
         try
@@ -60,6 +61,7 @@ sealed class Ducker
             {
                 if (session.GetProcessID == self || session.IsSystemSoundsSession) continue;
                 if (session.State != NAudio.CoreAudioApi.Interfaces.AudioSessionState.AudioSessionStateActive) continue;
+                if (spare is not null && ProcessName((int)session.GetProcessID) is { } name && Core.MeetingNotes.IsApp(name, spare)) continue;
                 float volume = session.SimpleAudioVolume.Volume;
                 if (volume <= volume * level + 0.001f) continue;
                 saved[session.GetSessionInstanceIdentifier] = volume;
@@ -98,6 +100,16 @@ sealed class Ducker
             }
             if (step < steps) Thread.Sleep(30);
         }
+    }
+
+    static string? ProcessName(int pid)
+    {
+        try
+        {
+            using var p = System.Diagnostics.Process.GetProcessById(pid);
+            return p.ProcessName;
+        }
+        catch (Exception e) when (e is ArgumentException or InvalidOperationException) { return null; }
     }
 
     static IEnumerable<AudioSessionControl> Sessions()
